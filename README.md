@@ -34,6 +34,8 @@ Each thread requires a working directory before Claude can run. This is where Cl
 
 The picker remembers previously used directories. CWD is stored per-thread in SQLite.
 
+![Interactive directory picker](assets/select-cwd.png)
+
 ### `$teach` — Team knowledge base
 
 Store team conventions and instructions that get injected into every Claude session via `--append-system-prompt`.
@@ -64,6 +66,12 @@ Team conventions:
 Responses stream to Slack token-by-token using Slack's native `chatStream` API (`chat.startStream` / `chat.appendStream` / `chat.stopStream`). This gives a smooth typing effect instead of chunked updates.
 
 If streaming fails (e.g., missing permissions or API errors), the bot falls back to throttled `chat.update` calls (every 750ms).
+
+Claude's tool calls are visualized as an agentic timeline — each tool invocation (file reads, code edits, shell commands) appears as a step that progresses from in-progress to complete.
+
+![Agentic task visualization with tool timeline](assets/git-push.png)
+
+![Streaming response with tool calls](assets/git-push-response.png)
 
 ### Stop button
 
@@ -163,11 +171,14 @@ The bot connects via Socket Mode — no ngrok or public URL needed.
 ## Architecture
 
 ```
-app.js          Main Bolt app — message handler, commands, streaming, App Home
-db.js           SQLite schema (10 tables) and prepared statement exports
-worktree.js     Git worktree lifecycle operations (create, remove, detect)
-manifest.yml    Slack app manifest (scopes, events, features)
-sessions.db     SQLite database (auto-created on first run)
+app.js              Registration hub — Bolt app, actions, modals, App Home, startup
+assistant.js        Assistant handlers — threadStarted, userMessage, commands
+stream-handler.js   Claude CLI streaming — NDJSON parsing, task chunks, usage logging
+blocks.js           Block Kit builders — stop button, feedback, disclaimer, prompts, dashboard
+db.js               SQLite schema (11 tables) and prepared statement exports
+worktree.js         Git worktree lifecycle operations (create, remove, detect)
+manifest.yml        Slack app manifest (scopes, events, features)
+sessions.db         SQLite database (auto-created on first run)
 ```
 
 ### Database tables
@@ -179,6 +190,7 @@ sessions.db     SQLite database (auto-created on first run)
 | `team_knowledge` | `$teach` instructions (soft-deletable) |
 | `usage_logs` | Token counts, cost, duration per invocation |
 | `worktrees` | Active git worktree tracking and cleanup state |
+| `feedback` | Thumbs up/down feedback on responses |
 | `annotations` | File annotations (future) |
 | `shared_sessions` | Session sharing via codes (future) |
 | `watched_channels` | Auto-respond channels (future) |
