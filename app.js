@@ -530,6 +530,16 @@ app.event("app_mention", async ({ event, client }) => {
   }
 
   await app.start();
+
+  console.log(`
+   _____ _                 _        ____  _            _
+  / ____| |               | |      / ___|| |          | |
+ | |    | | __ _ _   _  __| | ___ | (___ | | __ _  ___| | _____ _ __
+ | |    | |/ _\` | | | |/ _\` |/ _ \\ \\___ \\| |/ _\` |/ __| |/ / _ \\ '__|
+ | |____| | (_| | |_| | (_| |  __/ ____) | | (_| | (__|   <  __/ |
+  \\_____|_|\\__,_|\\__,_|\\__,_|\\___||_____/|_|\\__,_|\\___|_|\\_\\___|_|
+`);
+
   log(null, `Slack bot is running in Socket Mode`);
 
   // Worktree cleanup: every hour, remove worktrees idle >24h
