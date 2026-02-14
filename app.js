@@ -1,11 +1,16 @@
 require("dotenv").config();
 const { App } = require("@slack/bolt");
-const { spawn } = require("child_process");
+const {
+  getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,
+  addTeaching, getTeachings, removeTeaching,
+  getStaleWorktrees, getActiveWorktrees, markWorktreeCleaned,
+  addFeedback, getWorktree, touchWorktree, upsertWorktree,
+} = require("./db");
 const { randomUUID } = require("crypto");
-const { getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory } = require("./db");
-
-const CLAUDE_PATH = "/Users/dev/.local/bin/claude";
-const UPDATE_INTERVAL_MS = 750;
+const { removeWorktree, hasUncommittedChanges, detectGitRepo, createWorktree, copyEnvFiles } = require("./worktree");
+const { buildHomeBlocks } = require("./blocks");
+const { createAssistant } = require("./assistant");
+const { handleClaudeStream } = require("./stream-handler");
 
 function ts() {
   return new Date().toISOString();
@@ -19,39 +24,41 @@ function logErr(channel, ...args) {
   console.error(`${ts()} [${channel || "system"}]`, ...args);
 }
 
-// Build blocks with text and an optional Stop button
-function buildBlocks(text, threadKey, showStop) {
-  const blocks = [
-    { type: "section", text: { type: "mrkdwn", text: text || " " } },
-  ];
-  if (showStop) {
-    blocks.push({
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "Stop" },
-          style: "danger",
-          action_id: "stop_claude",
-          value: threadKey,
-        },
-      ],
-    });
-  }
-  return blocks;
-}
-
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   appToken: process.env.SLACK_APP_TOKEN,
   socketMode: true,
 });
 
-// Track active claude processes per channel
+// Track active claude processes per thread
 const activeProcesses = new Map();
 
-// Handle Stop button click
-app.action("stop_claude", async ({ action, ack, client, body }) => {
+// Shared ref so assistant.js can read the cached team_id
+const cachedTeamIdRef = { value: null };
+
+// ── Register Assistant ──────────────────────────────────────
+
+const assistant = createAssistant(activeProcesses, cachedTeamIdRef);
+app.assistant(assistant);
+
+// ── Feedback action handler ─────────────────────────────────
+
+app.action("response_feedback", async ({ action, ack, body }) => {
+  await ack();
+  const [sentiment, sessionKey] = action.value.split(":");
+  const userId = body.user?.id;
+  const messageTs = body.message?.ts;
+  log(null, `Feedback: sentiment=${sentiment} session=${sessionKey} user=${userId} ts=${messageTs}`);
+  try {
+    addFeedback(sessionKey, userId, sentiment, messageTs);
+  } catch (err) {
+    logErr(null, `Failed to log feedback: ${err.message}`);
+  }
+});
+
+// ── Stop button ─────────────────────────────────────────────
+
+app.action("stop_claude", async ({ action, ack, body }) => {
   await ack();
   const threadKey = action.value;
   log(threadKey, `Stop button pressed by user=${body.user?.id}`);
@@ -65,7 +72,8 @@ app.action("stop_claude", async ({ action, ack, client, body }) => {
   }
 });
 
-// Handle directory selection from $cwd picker
+// ── $cwd action handlers ────────────────────────────────────
+
 app.action("cwd_pick", async ({ action, ack, client, body }) => {
   await ack();
   const channelId = body.channel?.id || body.container?.channel_id;
@@ -87,11 +95,10 @@ app.action("cwd_pick", async ({ action, ack, client, body }) => {
   });
 });
 
-// Handle "Add new" button from $cwd picker — opens modal
 app.action("cwd_add_new", async ({ action, ack, client, body }) => {
   await ack();
-  // value contains JSON with channelId and threadTs
   const meta = JSON.parse(action.value);
+  log(meta.channelId, `cwd_add_new: opening modal user=${body.user?.id} thread=${meta.threadTs}`);
 
   await client.views.open({
     trigger_id: body.trigger_id,
@@ -118,7 +125,8 @@ app.action("cwd_add_new", async ({ action, ack, client, body }) => {
   });
 });
 
-// /cwd slash command — opens modal to set working directory
+// ── /cwd slash command ──────────────────────────────────────
+
 app.command("/cwd", async ({ command, ack, client }) => {
   await ack();
   const history = getCwdHistory();
@@ -170,7 +178,8 @@ app.command("/cwd", async ({ command, ack, client }) => {
   });
 });
 
-// Handle CWD modal submission
+// ── Modal submissions ───────────────────────────────────────
+
 app.view("cwd_modal", async ({ view, ack, client }) => {
   const meta = JSON.parse(view.private_metadata);
   const { channelId, threadTs } = meta;
@@ -178,8 +187,6 @@ app.view("cwd_modal", async ({ view, ack, client }) => {
 
   const inputVal = values.cwd_input_block?.cwd_input?.value;
   const selectVal = values.cwd_select_block?.cwd_select?.selected_option?.value;
-
-  // Text input takes priority if filled
   const chosenPath = inputVal || selectVal;
 
   if (!chosenPath) {
@@ -209,66 +216,150 @@ app.view("cwd_modal", async ({ view, ack, client }) => {
   });
 });
 
-app.message(async ({ message, client }) => {
-  log(message.channel, `Incoming message event: user=${message.user} subtype=${message.subtype || "none"} bot_id=${message.bot_id || "none"} ts=${message.ts} thread_ts=${message.thread_ts} text="${message.text}"`);
+app.view("teaching_modal", async ({ view, ack, client, body }) => {
+  log(null, `teaching_modal: submission by user=${body.user?.id}`);
+  const instruction = view.state.values.teaching_input_block.teaching_input.value;
+  if (!instruction?.trim()) {
+    log(null, `teaching_modal: rejected empty instruction`);
+    await ack({
+      response_action: "errors",
+      errors: { teaching_input_block: "Please enter an instruction." },
+    });
+    return;
+  }
+  await ack();
+  addTeaching(instruction.trim(), body.user.id);
+  log(null, `Teaching added via Home: "${instruction.trim()}" by user=${body.user.id}`);
 
-  if (message.subtype || message.bot_id) {
-    log(message.channel, `Skipping message: subtype=${message.subtype} bot_id=${message.bot_id}`);
+  try {
+    await client.views.publish({
+      user_id: body.user.id,
+      view: { type: "home", blocks: buildHomeBlocks(activeProcesses) },
+    });
+  } catch (err) {
+    logErr(null, `Failed to refresh Home after teaching add: ${err.message}`);
+  }
+});
+
+// ── App Home dashboard ──────────────────────────────────────
+
+app.event("app_home_opened", async ({ event, client }) => {
+  if (event.tab !== "home") return;
+  log(null, `App Home opened by user=${event.user}`);
+
+  try {
+    await client.views.publish({
+      user_id: event.user,
+      view: { type: "home", blocks: buildHomeBlocks(activeProcesses) },
+    });
+  } catch (err) {
+    logErr(null, `Failed to publish App Home: ${err.message}`);
+  }
+});
+
+app.action("home_view_teachings", async ({ ack, client, body }) => {
+  await ack();
+  log(null, `Home: "View Teachings" clicked by user=${body.user?.id}`);
+  const teachings = getTeachings("default");
+  log(null, `Home: fetched ${teachings.length} teachings for modal`);
+  const blocks = teachings.length > 0
+    ? teachings.map((t) => ({
+        type: "section",
+        text: { type: "mrkdwn", text: `*#${t.id}* \u2014 ${t.instruction}\n_Added by <@${t.added_by}> on ${t.created_at}_` },
+      }))
+    : [{ type: "section", text: { type: "mrkdwn", text: "No teachings yet." } }];
+
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: "modal",
+      title: { type: "plain_text", text: "Team Teachings" },
+      close: { type: "plain_text", text: "Close" },
+      blocks,
+    },
+  });
+});
+
+app.action("home_add_teaching", async ({ ack, client, body }) => {
+  await ack();
+  log(null, `Home: "Add Teaching" clicked by user=${body.user?.id}`);
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: "modal",
+      callback_id: "teaching_modal",
+      title: { type: "plain_text", text: "Add Teaching" },
+      submit: { type: "plain_text", text: "Save" },
+      close: { type: "plain_text", text: "Cancel" },
+      blocks: [
+        {
+          type: "input",
+          block_id: "teaching_input_block",
+          element: {
+            type: "plain_text_input",
+            action_id: "teaching_input",
+            multiline: true,
+            placeholder: { type: "plain_text", text: "e.g., Use TypeScript for all new files" },
+          },
+          label: { type: "plain_text", text: "Team convention or instruction" },
+        },
+      ],
+    },
+  });
+});
+
+// ── Channel @mention handler ────────────────────────────────
+
+const ALLOWED_USERS = new Set(
+  (process.env.ALLOWED_USERS || "").split(",").map((s) => s.trim()).filter(Boolean)
+);
+
+app.event("app_mention", async ({ event, client }) => {
+  const channelId = event.channel;
+  const threadTs = event.thread_ts || event.ts;
+  const userId = event.user;
+  const rawText = event.text || "";
+  // Strip the bot mention from text: "<@U12345> hello" -> "hello"
+  const userText = rawText.replace(/<@[A-Za-z0-9]+>/g, "").trim();
+
+  log(channelId, `app_mention: user=${userId} ts=${event.ts} thread_ts=${threadTs} raw="${rawText}" text="${userText}"`);
+
+  if (ALLOWED_USERS.size > 0 && !ALLOWED_USERS.has(userId)) {
+    log(channelId, `Blocked unauthorized user=${userId}`);
     return;
   }
 
-  const channelId = message.channel;
-  const threadTs = message.thread_ts || message.ts;
-  const userText = message.text;
-
-  // Handle $cwd command
-  if (userText?.match(/^\$cwd(\s|$)/i)) {
+  // ── $cwd command ──────────────────────────────────────────
+  if (userText.match(/^\$cwd(\s|$)/i)) {
     const pathArg = userText.replace(/^\$cwd\s*/i, "").trim();
-
-    // $cwd /path/to/dir — set directly
+    log(channelId, `$cwd command: pathArg="${pathArg}"`);
     if (pathArg) {
-      if (!getSession(threadTs)) {
-        upsertSession(threadTs, "pending");
-      }
+      if (!getSession(threadTs)) upsertSession(threadTs, "pending");
       setCwd(threadTs, pathArg);
       addCwdHistory(pathArg);
       log(channelId, `CWD set via $cwd to: ${pathArg}`);
       try {
-        await client.chat.postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: `Working directory set to \`${pathArg}\``,
-        });
-        log(channelId, `CWD confirmation message sent`);
+        await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `Working directory set to \`${pathArg}\`` });
       } catch (err) {
-        logErr(channelId, `Failed to send CWD confirmation: ${err.message}`);
+        logErr(channelId, `$cwd set reply failed: ${err.message}`);
       }
-      return;
-    }
+    } else {
+      // Bare $cwd — show interactive directory picker
+      const history = getCwdHistory();
+      log(channelId, `$cwd picker requested, history_count=${history.length}`);
 
-    // Bare $cwd — show interactive directory picker
-    const history = getCwdHistory();
-    log(channelId, `$cwd picker requested, history_count=${history.length}`);
+      const pickerBlocks = [
+        { type: "header", text: { type: "plain_text", text: "Set Working Directory" } },
+        { type: "divider" },
+      ];
 
-    const blocks = [
-      {
-        type: "header",
-        text: { type: "plain_text", text: "Set Working Directory" },
-      },
-      { type: "divider" },
-    ];
-
-    if (history.length > 0) {
-      blocks.push(
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: "*Recent directories:*" },
-        },
-        {
-          type: "actions",
-          block_id: "cwd_picker_block",
-          elements: [
-            {
+      if (history.length > 0) {
+        pickerBlocks.push(
+          { type: "section", text: { type: "mrkdwn", text: "*Recent directories:*" } },
+          {
+            type: "actions",
+            block_id: "cwd_picker_block",
+            elements: [{
               type: "static_select",
               action_id: "cwd_pick",
               placeholder: { type: "plain_text", text: "Choose a directory..." },
@@ -276,273 +367,192 @@ app.message(async ({ message, client }) => {
                 text: { type: "plain_text", text: h.path },
                 value: h.path,
               })),
-            },
+            }],
+          },
+          { type: "divider" },
+        );
+      }
+
+      pickerBlocks.push(
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "Enter a new path:" },
+          accessory: {
+            type: "button",
+            action_id: "cwd_add_new",
+            text: { type: "plain_text", text: "Add new..." },
+            style: "primary",
+            value: JSON.stringify({ channelId, threadTs }),
+          },
+        },
+        {
+          type: "context",
+          elements: [
+            { type: "mrkdwn", text: "Or send `$cwd /path/to/dir` to set directly" },
           ],
         },
-        { type: "divider" },
       );
+
+      try {
+        await client.chat.postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          blocks: pickerBlocks,
+          text: "Set working directory",
+        });
+        log(channelId, `$cwd picker sent`);
+      } catch (err) {
+        logErr(channelId, `$cwd picker reply failed: ${err.message}`);
+      }
     }
+    return;
+  }
 
-    blocks.push(
-      {
-        type: "section",
-        text: { type: "mrkdwn", text: "Enter a new path:" },
-        accessory: {
-          type: "button",
-          action_id: "cwd_add_new",
-          text: { type: "plain_text", text: "Add new..." },
-          style: "primary",
-          value: JSON.stringify({ channelId, threadTs }),
-        },
-      },
-      {
-        type: "context",
-        elements: [
-          { type: "mrkdwn", text: "Or send `$cwd /path/to/dir` to set directly" },
-        ],
-      },
-    );
-
+  // ── $teach command ────────────────────────────────────────
+  if (userText.match(/^\$teach(\s|$)/i)) {
+    const teachArg = userText.replace(/^\$teach\s*/i, "").trim();
+    log(channelId, `$teach command: arg="${teachArg}"`);
     try {
-      const resp = await client.chat.postMessage({
-        channel: channelId,
-        thread_ts: threadTs,
-        blocks,
-        text: "Set working directory",
-      });
-      log(channelId, `$cwd picker message sent: ok=${resp.ok} ts=${resp.ts}`);
+      if (!teachArg || teachArg === "help") {
+        await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: "`$teach <instruction>` — add\n`$teach list` — view all\n`$teach remove <id>` — remove" });
+        return;
+      }
+      if (teachArg === "list") {
+        const teachings = getTeachings("default");
+        const text = teachings.length > 0
+          ? teachings.map((t) => `#${t.id} — ${t.instruction}`).join("\n")
+          : "No teachings yet.";
+        await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text });
+        return;
+      }
+      const removeMatch = teachArg.match(/^remove\s+(\d+)$/i);
+      if (removeMatch) {
+        removeTeaching(parseInt(removeMatch[1], 10));
+        await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `Teaching #${removeMatch[1]} removed.` });
+        return;
+      }
+      const instruction = teachArg.replace(/^["']|["']$/g, "");
+      addTeaching(instruction, userId);
+      await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `Learned: _${instruction}_` });
     } catch (err) {
-      logErr(channelId, `Failed to send $cwd picker: ${err.message}`);
+      logErr(channelId, `$teach reply failed: ${err.message}`);
     }
     return;
   }
 
-  // If already processing in this thread, let the user know
+  // ── Guard: already processing ─────────────────────────────
   if (activeProcesses.has(threadTs)) {
-    const existing = activeProcesses.get(threadTs);
-    log(channelId, `Rejecting message — already processing (active pid=${existing.pid})`);
-    await client.chat.postMessage({
-      channel: channelId,
-      thread_ts: threadTs,
-      text: "Still processing the previous message...",
-    });
+    log(channelId, `Rejecting — already processing`);
+    try {
+      await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: "Still processing the previous message..." });
+    } catch (err) {
+      logErr(channelId, `Busy reply failed: ${err.message}`);
+    }
     return;
   }
 
-  // Look up or create session (keyed by thread)
-  // Session ID is only considered valid if set by Claude's system.init event.
-  // Until then it stays "pending" — we never resume a "pending" session.
+  if (!userText) {
+    log(channelId, `Empty mention, ignoring`);
+    return;
+  }
+
+  // ── Session lookup ────────────────────────────────────────
   const session = getSession(threadTs);
   let sessionId;
   let isResume = false;
-
   if (session && session.session_id && session.session_id !== "pending") {
     sessionId = session.session_id;
     isResume = true;
-    log(channelId, `Resuming session: ${sessionId} thread=${threadTs}`);
+    log(channelId, `Resuming session: ${sessionId}`);
   } else {
     sessionId = randomUUID();
-    // Don't store this UUID — keep DB as "pending" until Claude confirms via system.init
-    if (!session) {
-      upsertSession(threadTs, "pending");
-    }
-    log(channelId, `New session: ${sessionId} thread=${threadTs}`);
+    if (!session) upsertSession(threadTs, "pending");
+    log(channelId, `New session: ${sessionId}`);
   }
 
-  // Check if CWD is set — require it before spawning Claude
+  // ── CWD gate ──────────────────────────────────────────────
   const currentSession = getSession(threadTs);
   if (!currentSession?.cwd) {
-    log(channelId, `No CWD set, blocking message`);
+    log(channelId, `No CWD set, blocking`);
     try {
-      const resp = await client.chat.postMessage({
-        channel: channelId,
-        thread_ts: threadTs,
-        text: "No working directory set. Send `$cwd` to pick one, or `$cwd /path/to/dir` to set directly.",
-      });
-      log(channelId, `CWD gating message sent: ok=${resp.ok} ts=${resp.ts}`);
+      await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: "No working directory set. Send `$cwd /path/to/dir` to set one." });
     } catch (err) {
-      logErr(channelId, `Failed to send CWD gating message: ${err.message}`);
+      logErr(channelId, `CWD gate reply failed: ${err.message}`);
     }
     return;
   }
 
-  // Post initial placeholder message with Stop button
-  log(channelId, `Posting placeholder "Thinking..." message in thread=${message.ts}`);
-  const initialMsg = await client.chat.postMessage({
-    channel: channelId,
-    thread_ts: threadTs,
-    text: "Thinking...",
-    blocks: buildBlocks("Thinking...", threadTs, true),
-  });
-  const messageTs = initialMsg.ts;
-  log(channelId, `Placeholder posted: ts=${messageTs}`);
-
-  // Build claude args
-  const args = [
-    "-p", userText,
-    "--output-format", "stream-json",
-    "--verbose",
-    "--include-partial-messages",
-    "--dangerously-skip-permissions"
-  ];
-
-  if (isResume) {
-    args.push("--resume", sessionId);
+  // ── Worktree setup ────────────────────────────────────────
+  let spawnCwd = currentSession.cwd;
+  const existingWt = getWorktree(threadTs);
+  if (existingWt && !existingWt.cleaned_up) {
+    spawnCwd = existingWt.worktree_path;
+    touchWorktree(threadTs);
+    log(channelId, `Reusing worktree: ${spawnCwd}`);
   } else {
-    args.push("--session-id", sessionId);
-  }
-
-  log(channelId, `Spawning claude: ${CLAUDE_PATH} ${args.join(" ")}`);
-
-  // Spawn claude process — strip CLAUDECODE env to avoid nesting error
-  const env = { ...process.env };
-  delete env.CLAUDECODE;
-
-  const proc = spawn(CLAUDE_PATH, args, { env, cwd: currentSession.cwd, stdio: ["pipe", "pipe", "pipe"] });
-  proc.stdin.end(); // close stdin so claude doesn't block waiting for input
-  activeProcesses.set(threadTs, proc);
-
-  let accumulatedText = "";
-  let lastUpdateTime = 0;
-  let updateCount = 0;
-  let deltaCount = 0;
-  let buffer = "";
-  let stopped = false;
-  let done = false;
-  let lastUpdatePromise = Promise.resolve();
-  const startTime = Date.now();
-
-  log(channelId, `Claude process started: pid=${proc.pid}, session=${sessionId}, resume=${isResume}`);
-
-  proc.stdout.on("data", (chunk) => {
-    const raw = chunk.toString();
-    buffer += raw;
-    const lines = buffer.split("\n");
-    buffer = lines.pop(); // keep incomplete last line
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
+    const gitInfo = detectGitRepo(currentSession.cwd);
+    log(channelId, `Git detection: cwd=${currentSession.cwd} isGit=${gitInfo.isGit}`);
+    if (gitInfo.isGit) {
       try {
-        const data = JSON.parse(line);
-
-        // Log every event type we receive
-        if (data.type === "system") {
-          log(channelId, `stream: type=system subtype=${data.subtype} session_id=${data.session_id} model=${data.model || "n/a"}`);
-          if (data.subtype === "init" && data.session_id) {
-            const oldId = sessionId;
-            sessionId = data.session_id;
-            upsertSession(threadTs, data.session_id);
-            log(channelId, `Session ID updated: ${oldId} -> ${data.session_id}`);
-          }
-        } else if (data.type === "stream_event") {
-          const evt = data.event;
-          if (evt?.type === "message_start") {
-            log(channelId, `stream: message_start model=${evt.message?.model} id=${evt.message?.id}`);
-          } else if (evt?.type === "content_block_start") {
-            log(channelId, `stream: content_block_start index=${evt.index} type=${evt.content_block?.type}`);
-          } else if (evt?.type === "content_block_delta" && evt?.delta?.type === "text_delta") {
-            deltaCount++;
-            accumulatedText += evt.delta.text;
-
-            // Log every 10th delta to avoid spam, but always log first
-            if (deltaCount === 1 || deltaCount % 10 === 0) {
-              log(channelId, `stream: text_delta #${deltaCount}, accumulated length=${accumulatedText.length} chars`);
-            }
-
-            // Throttle Slack updates — include Stop button while streaming
-            const now = Date.now();
-            if (!done && now - lastUpdateTime >= UPDATE_INTERVAL_MS) {
-              lastUpdateTime = now;
-              updateCount++;
-              log(channelId, `chat.update #${updateCount}: ${accumulatedText.length} chars, elapsed=${now - startTime}ms`);
-              lastUpdatePromise = client.chat
-                .update({
-                  channel: channelId,
-                  ts: messageTs,
-                  text: accumulatedText,
-                  blocks: buildBlocks(accumulatedText, threadTs, true),
-                })
-                .catch((err) => {
-                  logErr(channelId, `chat.update failed: ${err.message}`);
-                });
-            }
-          } else if (evt?.type === "content_block_stop") {
-            log(channelId, `stream: content_block_stop index=${evt.index}`);
-          } else if (evt?.type === "message_delta") {
-            log(channelId, `stream: message_delta stop_reason=${evt.delta?.stop_reason}`);
-          } else if (evt?.type === "message_stop") {
-            log(channelId, `stream: message_stop`);
-          } else {
-            log(channelId, `stream: stream_event type=${evt?.type}`);
-          }
-        } else if (data.type === "assistant") {
-          const content = data.message?.content;
-          const textLen = content?.[0]?.text?.length || 0;
-          log(channelId, `stream: assistant message, content_length=${textLen} chars`);
-        } else if (data.type === "result") {
-          const elapsed = Date.now() - startTime;
-          log(channelId, `stream: result subtype=${data.subtype} is_error=${data.is_error} duration_ms=${data.duration_ms} api_ms=${data.duration_api_ms} turns=${data.num_turns} cost=$${data.total_cost_usd?.toFixed(4)} session=${data.session_id}`);
-          log(channelId, `stream: total deltas=${deltaCount}, slack updates=${updateCount}, wall_time=${elapsed}ms`);
-        } else {
-          log(channelId, `stream: unknown type=${data.type}`);
-        }
+        const { worktreePath, branchName } = createWorktree(gitInfo.repoRoot, threadTs);
+        copyEnvFiles(currentSession.cwd, worktreePath);
+        upsertWorktree(threadTs, gitInfo.repoRoot, worktreePath, branchName);
+        spawnCwd = worktreePath;
+        log(channelId, `Created worktree: ${worktreePath}`);
       } catch (err) {
-        logErr(channelId, `Failed to parse stream line: ${err.message} — raw: ${line.substring(0, 200)}`);
+        logErr(channelId, `Worktree creation failed: ${err.message}`);
       }
     }
-  });
+  }
 
-  proc.stderr.on("data", (chunk) => {
-    logErr(channelId, `claude stderr: ${chunk.toString().trim()}`);
-  });
-
-  proc.on("error", (err) => {
-    logErr(channelId, `claude process error: ${err.message}`);
-    activeProcesses.delete(threadTs);
-  });
-
-  proc.on("close", async (code, signal) => {
-    done = true;
-    activeProcesses.delete(threadTs);
-    stopped = signal === "SIGTERM";
-    const elapsed = Date.now() - startTime;
-
-    log(channelId, `Claude process exited: code=${code} signal=${signal} pid=${proc.pid} elapsed=${elapsed}ms stopped=${stopped}`);
-    log(channelId, `Final stats: deltas=${deltaCount}, slack_updates=${updateCount}, text_length=${accumulatedText.length}`);
-
-    let finalText;
-    if (stopped) {
-      finalText = accumulatedText
-        ? accumulatedText + "\n\n_Stopped by user._"
-        : "_Stopped by user._";
-    } else {
-      finalText = accumulatedText || (code !== 0 ? "Something went wrong." : "No response.");
-    }
-
-    // Wait for any in-flight throttled update to settle before sending final
-    await lastUpdatePromise;
-
-    // Final update — remove Stop button
-    log(channelId, `Sending final chat.update (${finalText.length} chars, stop button removed)`);
-    await client.chat
-      .update({
-        channel: channelId,
-        ts: messageTs,
-        text: finalText,
-        blocks: buildBlocks(finalText, threadTs, false),
-      })
-      .catch((err) => {
-        logErr(channelId, `Final chat.update failed: ${err.message}`);
-      });
-
-    log(channelId, `Done processing message from user=${message.user}`);
+  // ── Delegate to stream handler (no-op setStatus for channels) ─
+  await handleClaudeStream({
+    channelId, threadTs, userText, userId, client,
+    spawnCwd, isResume, sessionId,
+    setStatus: async () => {},
+    activeProcesses,
+    cachedTeamId: cachedTeamIdRef.value,
   });
 });
 
+// ── Startup ─────────────────────────────────────────────────
+
 (async () => {
   log(null, `Starting Slack bot...`);
-  log(null, `Claude path: ${CLAUDE_PATH}`);
-  log(null, `Update interval: ${UPDATE_INTERVAL_MS}ms`);
+
+  // Cache team ID for chatStream
+  try {
+    const authResult = await app.client.auth.test();
+    cachedTeamIdRef.value = authResult.team_id;
+    log(null, `Cached team_id: ${cachedTeamIdRef.value}`);
+  } catch (err) {
+    logErr(null, `Failed to cache team_id (streaming will use fallback): ${err.message}`);
+  }
+
   await app.start();
   log(null, `Slack bot is running in Socket Mode`);
+
+  // Worktree cleanup: every hour, remove worktrees idle >24h
+  setInterval(() => {
+    try {
+      const stale = getStaleWorktrees(1440);
+      log(null, `Worktree cleanup: found ${stale.length} stale worktree(s) (idle >24h)`);
+      for (const wt of stale) {
+        if (activeProcesses.has(wt.session_key)) continue;
+        if (hasUncommittedChanges(wt.worktree_path)) {
+          log(null, `Skipping stale worktree with uncommitted changes: ${wt.worktree_path}`);
+          continue;
+        }
+        try {
+          removeWorktree(wt.repo_path, wt.worktree_path, wt.branch_name);
+          markWorktreeCleaned(wt.session_key);
+          log(null, `Cleaned stale worktree: ${wt.worktree_path}`);
+        } catch (err) {
+          logErr(null, `Failed to clean worktree ${wt.worktree_path}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      logErr(null, `Worktree cleanup error: ${err.message}`);
+    }
+  }, 60 * 60 * 1000);
 })();

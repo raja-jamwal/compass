@@ -4,6 +4,8 @@ const path = require("path");
 const db = new Database(path.join(__dirname, "sessions.db"));
 db.pragma("journal_mode = WAL");
 
+// ── Core tables ─────────────────────────────────────────────
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     channel_id TEXT PRIMARY KEY,
@@ -14,11 +16,10 @@ db.exec(`
   )
 `);
 
-// Add persisted column if migrating from old schema
+// Migrations for sessions table
 try { db.exec("ALTER TABLE sessions ADD COLUMN persisted INTEGER DEFAULT 0"); } catch {}
-
-// Add cwd column if migrating from old schema
 try { db.exec("ALTER TABLE sessions ADD COLUMN cwd TEXT DEFAULT NULL"); } catch {}
+try { db.exec("ALTER TABLE sessions ADD COLUMN user_id TEXT DEFAULT NULL"); } catch {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS cwd_history (
@@ -26,6 +27,129 @@ db.exec(`
     last_used TEXT DEFAULT (datetime('now'))
   )
 `);
+
+// ── Phase 1 tables ──────────────────────────────────────────
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS team_knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instruction TEXT NOT NULL,
+    added_by TEXT NOT NULL,
+    workspace_id TEXT DEFAULT 'default',
+    created_at TEXT DEFAULT (datetime('now')),
+    active INTEGER DEFAULT 1
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    line_start INTEGER,
+    line_end INTEGER,
+    content TEXT NOT NULL,
+    category TEXT DEFAULT 'general',
+    commit_hash TEXT,
+    added_by TEXT NOT NULL,
+    session_key TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    active INTEGER DEFAULT 1
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS usage_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_key TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    model TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    total_cost_usd REAL DEFAULT 0,
+    duration_ms INTEGER DEFAULT 0,
+    num_turns INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shared_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    share_code TEXT UNIQUE NOT NULL,
+    session_key TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    shared_by TEXT NOT NULL,
+    summary TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS watched_channels (
+    channel_id TEXT PRIMARY KEY,
+    added_by TEXT NOT NULL,
+    watch_mode TEXT DEFAULT 'errors',
+    rate_limit_minutes INTEGER DEFAULT 30,
+    last_triggered_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    active INTEGER DEFAULT 1
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_key TEXT NOT NULL,
+    snapshot_name TEXT,
+    git_stash_ref TEXT,
+    git_branch TEXT,
+    worktree_path TEXT,
+    files_changed TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS mcp_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_name TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    workspace_id TEXT DEFAULT 'default',
+    added_by TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(server_name, workspace_id)
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_key TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    sentiment TEXT NOT NULL,
+    message_ts TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS worktrees (
+    session_key TEXT PRIMARY KEY,
+    repo_path TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    branch_name TEXT NOT NULL,
+    locked INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    last_active_at TEXT DEFAULT (datetime('now')),
+    cleaned_up INTEGER DEFAULT 0
+  )
+`);
+
+// ── Prepared statements: sessions ───────────────────────────
 
 const getSession = db.prepare("SELECT * FROM sessions WHERE channel_id = ?");
 
@@ -57,13 +181,116 @@ const addCwdHistory = db.prepare(`
   ON CONFLICT(path) DO UPDATE SET last_used = datetime('now')
 `);
 
+const getAllActiveSessions = db.prepare(
+  "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 20"
+);
+
+// ── Prepared statements: team_knowledge ─────────────────────
+
+const _addTeaching = db.prepare(`
+  INSERT INTO team_knowledge (instruction, added_by, workspace_id)
+  VALUES (?, ?, ?)
+`);
+
+const _getTeachings = db.prepare(
+  "SELECT id, instruction, added_by, created_at FROM team_knowledge WHERE workspace_id = ? AND active = 1 ORDER BY id"
+);
+
+const _removeTeaching = db.prepare(
+  "UPDATE team_knowledge SET active = 0 WHERE id = ?"
+);
+
+const _getTeachingCount = db.prepare(
+  "SELECT COUNT(*) as count FROM team_knowledge WHERE workspace_id = ? AND active = 1"
+);
+
+// ── Prepared statements: usage_logs ─────────────────────────
+
+const _addUsageLog = db.prepare(`
+  INSERT INTO usage_logs (session_key, user_id, model, input_tokens, output_tokens, total_cost_usd, duration_ms, num_turns)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const _getRecentUsage = db.prepare(
+  "SELECT * FROM usage_logs ORDER BY created_at DESC LIMIT ?"
+);
+
+// ── Prepared statements: worktrees ──────────────────────────
+
+const _upsertWorktree = db.prepare(`
+  INSERT INTO worktrees (session_key, repo_path, worktree_path, branch_name)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT(session_key) DO UPDATE SET
+    repo_path = excluded.repo_path,
+    worktree_path = excluded.worktree_path,
+    branch_name = excluded.branch_name,
+    last_active_at = datetime('now'),
+    cleaned_up = 0
+`);
+
+const _getWorktree = db.prepare(
+  "SELECT * FROM worktrees WHERE session_key = ?"
+);
+
+const _touchWorktree = db.prepare(
+  "UPDATE worktrees SET last_active_at = datetime('now') WHERE session_key = ?"
+);
+
+const _markWorktreeCleaned = db.prepare(
+  "UPDATE worktrees SET cleaned_up = 1 WHERE session_key = ?"
+);
+
+const _getStaleWorktrees = db.prepare(
+  "SELECT * FROM worktrees WHERE cleaned_up = 0 AND last_active_at < datetime('now', '-' || ? || ' minutes')"
+);
+
+const _getActiveWorktrees = db.prepare(
+  "SELECT * FROM worktrees WHERE cleaned_up = 0"
+);
+
+// ── Prepared statements: feedback ────────────────────────────
+
+const _addFeedback = db.prepare(`
+  INSERT INTO feedback (session_key, user_id, sentiment, message_ts)
+  VALUES (?, ?, ?, ?)
+`);
+
+// ── Exports ─────────────────────────────────────────────────
+
 module.exports = {
+  // sessions
   getSession: (channelId) => getSession.get(channelId),
   upsertSession: (channelId, sessionId) => upsertSession.run(channelId, sessionId),
   markPersisted: (channelId) => markPersisted.run(channelId),
   deleteSession: (channelId) => deleteSession.run(channelId),
   setCwd: (channelId, cwd) => setCwd.run(cwd, channelId),
   getCwdHistory: () => getCwdHistory.all(),
-  addCwdHistory: (path) => addCwdHistory.run(path),
+  addCwdHistory: (p) => addCwdHistory.run(p),
+  getAllActiveSessions: () => getAllActiveSessions.all(),
+
+  // team_knowledge
+  addTeaching: (instruction, addedBy, workspaceId = "default") => _addTeaching.run(instruction, addedBy, workspaceId),
+  getTeachings: (workspaceId = "default") => _getTeachings.all(workspaceId),
+  removeTeaching: (id) => _removeTeaching.run(id),
+  getTeachingCount: (workspaceId = "default") => _getTeachingCount.get(workspaceId),
+
+  // usage_logs
+  addUsageLog: (sessionKey, userId, model, inputTokens, outputTokens, cost, durationMs, numTurns) =>
+    _addUsageLog.run(sessionKey, userId, model, inputTokens, outputTokens, cost, durationMs, numTurns),
+  getRecentUsage: (limit = 10) => _getRecentUsage.all(limit),
+
+  // worktrees
+  upsertWorktree: (sessionKey, repoPath, worktreePath, branchName) =>
+    _upsertWorktree.run(sessionKey, repoPath, worktreePath, branchName),
+  getWorktree: (sessionKey) => _getWorktree.get(sessionKey),
+  touchWorktree: (sessionKey) => _touchWorktree.run(sessionKey),
+  markWorktreeCleaned: (sessionKey) => _markWorktreeCleaned.run(sessionKey),
+  getStaleWorktrees: (idleMinutes) => _getStaleWorktrees.all(idleMinutes),
+  getActiveWorktrees: () => _getActiveWorktrees.all(),
+
+  // feedback
+  addFeedback: (sessionKey, userId, sentiment, messageTs) =>
+    _addFeedback.run(sessionKey, userId, sentiment, messageTs),
+
   db,
 };
