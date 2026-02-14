@@ -2,6 +2,8 @@
 
 A Slack app that connects Claude Code to your workspace. Every thread becomes a coding session — set a working directory, ask questions, and get answers with full access to your local filesystem. Claude runs on your machine, streams responses in real-time, and remembers context across messages.
 
+![Agentic task visualization with tool timeline](assets/git-push.png)
+
 ## How it works
 
 The bot runs locally on your machine using Slack's Socket Mode (no public URL needed). When you send a message in the App Home, it spawns a `claude` CLI process, streams the output back to Slack using the native streaming API, and maintains session continuity across messages in the same thread.
@@ -68,8 +70,6 @@ Responses stream to Slack token-by-token using Slack's native `chatStream` API (
 If streaming fails (e.g., missing permissions or API errors), the bot falls back to throttled `chat.update` calls (every 750ms).
 
 Claude's tool calls are visualized as an agentic timeline — each tool invocation (file reads, code edits, shell commands) appears as a step that progresses from in-progress to complete.
-
-![Agentic task visualization with tool timeline](assets/git-push.png)
 
 ![Streaming response with tool calls](assets/git-push-response.png)
 
