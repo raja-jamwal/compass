@@ -1,6 +1,6 @@
 display_information:
   name: Claude-slacker
-  description: claude slacker
+  description: Bring Claude Code to your Slack workspace.
   background_color: "#2c2d30"
 features:
   app_home:
@@ -11,8 +11,16 @@ features:
     display_name: claude-slacker
     always_online: true
   assistant_view:
-    assistant_description: Claude Code assistant
-    suggested_prompts: []
+    assistant_description: Claude Code agent — runs on your local machine with full filesystem access
+    suggested_prompts:
+      - title: Explain this codebase
+        message: Give me a high-level overview of this project's architecture
+      - title: Find and fix bugs
+        message: Look for potential bugs or issues in the codebase
+      - title: Write tests
+        message: Identify code lacking test coverage and write tests
+      - title: Refactor code
+        message: Suggest refactoring opportunities to improve the codebase
   slash_commands:
     - command: /cwd
       description: Set working directory for Claude
@@ -51,7 +59,9 @@ settings:
       - message.channels
       - message.im
       - app_mention
+      - app_home_opened
       - assistant_thread_started
+      - assistant_thread_context_changed
   interactivity:
     is_enabled: true
   org_deploy_enabled: false
