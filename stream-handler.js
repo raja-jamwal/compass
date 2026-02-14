@@ -144,6 +144,13 @@ async function handleClaudeStream(opts) {
     "--dangerously-skip-permissions",
   ];
 
+  // Append user-defined additional args from .env
+  const additionalArgs = (process.env.CLAUDE_ADDITIONAL_ARGS || "").trim();
+  if (additionalArgs) {
+    args.push(...additionalArgs.split(/\s+/));
+    log(channelId, `Additional claude args: ${additionalArgs}`);
+  }
+
   if (isResume) {
     args.push("--resume", sessionId);
   } else {
