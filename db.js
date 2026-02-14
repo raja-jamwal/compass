@@ -17,6 +17,16 @@ db.exec(`
 // Add persisted column if migrating from old schema
 try { db.exec("ALTER TABLE sessions ADD COLUMN persisted INTEGER DEFAULT 0"); } catch {}
 
+// Add cwd column if migrating from old schema
+try { db.exec("ALTER TABLE sessions ADD COLUMN cwd TEXT DEFAULT NULL"); } catch {}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cwd_history (
+    path TEXT PRIMARY KEY,
+    last_used TEXT DEFAULT (datetime('now'))
+  )
+`);
+
 const getSession = db.prepare("SELECT * FROM sessions WHERE channel_id = ?");
 
 const upsertSession = db.prepare(`
@@ -34,10 +44,26 @@ const markPersisted = db.prepare(
 
 const deleteSession = db.prepare("DELETE FROM sessions WHERE channel_id = ?");
 
+const setCwd = db.prepare(
+  "UPDATE sessions SET cwd = ?, updated_at = datetime('now') WHERE channel_id = ?"
+);
+
+const getCwdHistory = db.prepare(
+  "SELECT path, last_used FROM cwd_history ORDER BY last_used DESC"
+);
+
+const addCwdHistory = db.prepare(`
+  INSERT INTO cwd_history (path, last_used) VALUES (?, datetime('now'))
+  ON CONFLICT(path) DO UPDATE SET last_used = datetime('now')
+`);
+
 module.exports = {
   getSession: (channelId) => getSession.get(channelId),
   upsertSession: (channelId, sessionId) => upsertSession.run(channelId, sessionId),
   markPersisted: (channelId) => markPersisted.run(channelId),
   deleteSession: (channelId) => deleteSession.run(channelId),
+  setCwd: (channelId, cwd) => setCwd.run(cwd, channelId),
+  getCwdHistory: () => getCwdHistory.all(),
+  addCwdHistory: (path) => addCwdHistory.run(path),
   db,
 };
