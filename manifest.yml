@@ -21,9 +21,6 @@ features:
         message: Identify code lacking test coverage and write tests
       - title: Refactor code
         message: Suggest refactoring opportunities to improve the codebase
-  slash_commands:
-    - command: /cwd
-      description: Set working directory for Claude
 oauth_config:
   scopes:
     user:
