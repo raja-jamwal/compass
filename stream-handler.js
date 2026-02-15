@@ -463,6 +463,21 @@ async function handleClaudeStream(opts) {
       // Clear Assistant status indicator
       await setStatus("").catch(() => {});
 
+      // DM the user a notification with a permalink to the thread
+      try {
+        const linkRes = await client.chat.getPermalink({ channel: channelId, message_ts: threadTs });
+        const dmRes = await client.conversations.open({ users: userId });
+        if (dmRes.ok && dmRes.channel?.id) {
+          await client.chat.postMessage({
+            channel: dmRes.channel.id,
+            text: `Your request is ready: ${linkRes.permalink}`,
+            unfurl_links: false,
+          });
+          log(channelId, `DM notification sent to user=${userId}`);
+        }
+      } catch (err) {
+        logErr(channelId, `DM notification failed: ${err.message}`);
+      }
 
       log(channelId, `Done processing message from user=${userId}`);
       resolve();
