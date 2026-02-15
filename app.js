@@ -1,5 +1,7 @@
 require("dotenv").config();
 const { App } = require("@slack/bolt");
+const fs = require("fs");
+const { execFileSync } = require("child_process");
 const {
   getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,
   addTeaching, getTeachings, removeTeaching,
@@ -518,6 +520,24 @@ app.event("app_mention", async ({ event, client }) => {
 // ── Startup ─────────────────────────────────────────────────
 
 (async () => {
+  // Validate CLAUDE_PATH exists before starting
+  const claudePath = process.env.CLAUDE_PATH || "claude";
+  try {
+    // Check if it's an absolute path that exists, or resolve via which
+    if (claudePath.startsWith("/")) {
+      if (!fs.existsSync(claudePath)) {
+        console.error(`ERROR: CLAUDE_PATH not found: ${claudePath}`);
+        process.exit(1);
+      }
+    } else {
+      execFileSync("which", [claudePath], { stdio: ["pipe", "pipe", "pipe"] });
+    }
+    log(null, `Claude CLI found: ${claudePath}`);
+  } catch {
+    console.error(`ERROR: CLAUDE_PATH "${claudePath}" not found in PATH. Set CLAUDE_PATH in .env to the full path of the claude binary.`);
+    process.exit(1);
+  }
+
   log(null, `Starting Slack bot...`);
 
   // Cache team ID for chatStream

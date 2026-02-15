@@ -15,7 +15,7 @@ const {
   buildBlocks, buildStopOnlyBlocks, buildFeedbackBlock, buildDisclaimerBlock,
 } = require("./blocks");
 
-const CLAUDE_PATH = "/Users/dev/.local/bin/claude";
+const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const UPDATE_INTERVAL_MS = 750;
 
 function ts() {
@@ -172,6 +172,13 @@ async function handleClaudeStream(opts) {
   // ── Spawn Claude process ──────────────────────────────────
   const env = { ...process.env };
   delete env.CLAUDECODE;
+
+  // Inject ENV_* variables: ENV_ANTHROPIC_KEY=xxx → ANTHROPIC_KEY=xxx
+  for (const [key, val] of Object.entries(process.env)) {
+    if (key.startsWith("ENV_") && key.length > 4) {
+      env[key.slice(4)] = val;
+    }
+  }
 
   const proc = spawn(CLAUDE_PATH, args, { env, cwd: spawnCwd, stdio: ["pipe", "pipe", "pipe"] });
   proc.stdin.end();
@@ -459,4 +466,4 @@ async function handleClaudeStream(opts) {
   });
 }
 
-module.exports = { handleClaudeStream, CLAUDE_PATH };
+module.exports = { handleClaudeStream };

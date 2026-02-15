@@ -243,9 +243,9 @@ Errors go to stderr via `logErr()`. The format is `TIMESTAMP [CHANNEL_ID] messag
 | `SLACK_APP_TOKEN` | Yes | App-level token (`xapp-...`) for Socket Mode |
 | `SLACK_BOT_TOKEN` | Yes | Bot user OAuth token (`xoxb-...`) |
 | `ALLOWED_USERS` | No | Comma-separated Slack user IDs to whitelist |
+| `CLAUDE_PATH` | No | Path to the `claude` binary (defaults to `claude` in PATH) |
 | `CLAUDE_ADDITIONAL_ARGS` | No | Extra CLI args appended to every `claude` invocation (space-separated) |
-
-The Claude CLI path is hardcoded at the top of `stream-handler.js` (`CLAUDE_PATH`). Update it if your `claude` binary is installed elsewhere.
+| `ENV_*` | No | Variables prefixed with `ENV_` are injected into the Claude process (e.g. `ENV_ANTHROPIC_API_KEY=sk-...` sets `ANTHROPIC_API_KEY`) |
 
 ## Manifest scopes
 
