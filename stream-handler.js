@@ -463,6 +463,13 @@ async function handleClaudeStream(opts) {
       // Clear Assistant status indicator
       await setStatus("").catch(() => {});
 
+      // Notify the user that processing is complete
+      await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: `cc: <@${userId}>`,
+      }).catch((err) => logErr(channelId, `User notification failed: ${err.message}`));
+
       log(channelId, `Done processing message from user=${userId}`);
       resolve();
     });
