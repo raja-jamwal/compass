@@ -460,6 +460,9 @@ async function handleClaudeStream(opts) {
           .catch((err) => logErr(channelId, `Final chat.update failed: ${err.message}`));
       }
 
+      // Clear Assistant status indicator
+      await setStatus("").catch(() => {});
+
       log(channelId, `Done processing message from user=${userId}`);
       resolve();
     });
