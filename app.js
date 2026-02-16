@@ -44,7 +44,7 @@ const cachedBotUserIdRef = { value: null };
 
 // ── Register Assistant ──────────────────────────────────────
 
-const assistant = createAssistant(activeProcesses, cachedTeamIdRef);
+const assistant = createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef);
 app.assistant(assistant);
 
 // ── Feedback action handler ─────────────────────────────────
@@ -772,6 +772,7 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
     setStatus: async () => {},
     activeProcesses,
     cachedTeamId: cachedTeamIdRef.value,
+    botUserId: cachedBotUserIdRef.value,
   });
 }
 
@@ -794,6 +795,24 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
   } catch {
     console.error(`ERROR: CLAUDE_PATH "${claudePath}" not found in PATH. Set CLAUDE_PATH in .env to the full path of the claude binary.`);
     process.exit(1);
+  }
+
+  // Register MCP server (idempotent — overwrites if already exists)
+  try {
+    const mcpServerPath = require("path").join(__dirname, "mcp-server.js");
+    const mcpEnv = { ...process.env };
+    delete mcpEnv.CLAUDECODE; // avoid nested-session check
+    execFileSync(claudePath, [
+      "mcp", "add",
+      "--transport", "stdio",
+      "--scope", "user",
+      "claude-slacker",
+      "--",
+      "node", mcpServerPath,
+    ], { encoding: "utf-8", timeout: 10000, env: mcpEnv, stdio: ["pipe", "pipe", "pipe"] });
+    log(null, `MCP server registered: claude-slacker -> ${mcpServerPath}`);
+  } catch (err) {
+    logErr(null, `Failed to register MCP server (non-fatal): ${err.message}`);
   }
 
   log(null, `Starting Slack bot...`);

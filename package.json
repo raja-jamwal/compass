@@ -6,6 +6,7 @@
     "start": "node app.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@slack/bolt": "^4.1.0",
     "better-sqlite3": "^12.6.2",
     "cron-parser": "^5.5.0",

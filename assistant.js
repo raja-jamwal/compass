@@ -42,7 +42,7 @@ function logErr(channel, ...args) {
  * @param {{ value: string|null }} cachedTeamIdRef
  * @returns {Assistant}
  */
-function createAssistant(activeProcesses, cachedTeamIdRef) {
+function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
   return new Assistant({
     threadStarted: async ({ event, setSuggestedPrompts }) => {
       const threadTs = event.assistant_thread?.thread_ts;
@@ -329,6 +329,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef) {
         setStatus,
         activeProcesses,
         cachedTeamId: cachedTeamIdRef.value,
+        botUserId: cachedBotUserIdRef.value,
       });
     },
   });

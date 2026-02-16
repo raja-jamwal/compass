@@ -96,7 +96,7 @@ async function handleClaudeStream(opts) {
   const {
     channelId, threadTs, userText, userId, client,
     spawnCwd, isResume, setStatus,
-    activeProcesses, cachedTeamId,
+    activeProcesses, cachedTeamId, botUserId,
   } = opts;
   let { sessionId } = opts;
 
@@ -179,6 +179,11 @@ async function handleClaudeStream(opts) {
       env[key.slice(4)] = val;
     }
   }
+
+  // Inject Slack context for MCP server tools
+  env.SLACK_CHANNEL_ID = channelId;
+  env.SLACK_USER_ID = userId;
+  if (botUserId) env.SLACK_BOT_USER_ID = botUserId;
 
   const proc = spawn(CLAUDE_PATH, args, { env, cwd: spawnCwd, stdio: ["pipe", "pipe", "pipe"] });
   proc.stdin.end();
