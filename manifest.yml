@@ -15,6 +15,10 @@ features:
       description: Set the default working directory for this channel
       usage_hint: /cwd
       should_escape: false
+    - command: /reminder
+      description: Create scheduled reminders that trigger Claude
+      usage_hint: "[what and when] | list | remove <id>"
+      should_escape: false
   assistant_view:
     assistant_description: Claude Code agent — runs on your local machine with full filesystem access
     suggested_prompts:

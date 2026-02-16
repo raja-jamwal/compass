@@ -8,8 +8,10 @@ const {
   addTeaching, getTeachings, removeTeaching,
   getStaleWorktrees, getActiveWorktrees, markWorktreeCleaned,
   addFeedback, getWorktree, touchWorktree, upsertWorktree,
+  addReminder, getDueReminders, updateNextTrigger, deactivateReminder, getActiveReminders,
 } = require("./db");
 const { randomUUID } = require("crypto");
+const { CronExpressionParser } = require("cron-parser");
 const { removeWorktree, hasUncommittedChanges, detectGitRepo, createWorktree, copyEnvFiles } = require("./worktree");
 const { buildHomeBlocks } = require("./blocks");
 const { createAssistant } = require("./assistant");
@@ -36,8 +38,9 @@ const app = new App({
 // Track active claude processes per thread
 const activeProcesses = new Map();
 
-// Shared ref so assistant.js can read the cached team_id
+// Shared refs so assistant.js can read the cached team_id
 const cachedTeamIdRef = { value: null };
+const cachedBotUserIdRef = { value: null };
 
 // ── Register Assistant ──────────────────────────────────────
 
@@ -187,6 +190,210 @@ app.command("/cwd", async ({ command, ack, client }) => {
       close: { type: "plain_text", text: "Cancel" },
       blocks,
     },
+  });
+});
+
+// ── /reminder slash command ──────────────────────────────────
+
+const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+
+/** Convert a Date or ISO string to SQLite datetime format (YYYY-MM-DD HH:MM:SS UTC) */
+function toSqliteDatetime(d) {
+  const date = typeof d === "string" ? new Date(d) : d;
+  return date.toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
+}
+
+app.command("/reminder", async ({ command, ack, client }) => {
+  await ack();
+  const userId = command.user_id;
+  const channelId = command.channel_id;
+  const text = (command.text || "").trim();
+
+  log(channelId, `/reminder command invoked by user=${userId} text="${text}"`);
+
+  // ── /reminder list ────────────────────────────────────────
+  if (text.toLowerCase() === "list") {
+    const reminders = getActiveReminders(userId);
+    if (reminders.length === 0) {
+      await client.chat.postEphemeral({
+        channel: channelId,
+        user: userId,
+        text: "You have no active reminders.",
+      });
+      return;
+    }
+    const lines = reminders.map((r) => {
+      const schedule = r.cron_expression
+        ? `cron: \`${r.cron_expression}\``
+        : "one-time";
+      return `*#${r.id}* — ${r.content}\n  _${schedule} | next: ${r.next_trigger_at} | channel: <#${r.channel_id}>_`;
+    });
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: `*Your active reminders:*\n\n${lines.join("\n\n")}`,
+    });
+    return;
+  }
+
+  // ── /reminder remove <id> ─────────────────────────────────
+  const removeMatch = text.match(/^(?:remove|delete)\s+(\d+)$/i);
+  if (removeMatch) {
+    const id = parseInt(removeMatch[1], 10);
+    deactivateReminder(id);
+    log(channelId, `Reminder #${id} deactivated by user=${userId}`);
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: `Reminder #${id} deactivated.`,
+    });
+    return;
+  }
+
+  // ── /reminder (no text) — show usage ──────────────────────
+  if (!text) {
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: "*Usage:*\n• `/reminder <what and when>` — create a reminder\n• `/reminder list` — view active reminders\n• `/reminder remove <id>` — deactivate a reminder\n\n*Examples:*\n• `/reminder run the test suite every weekday at 9am`\n• `/reminder check deployment status in 30 minutes`\n• `/reminder review PRs every Monday at 10am`",
+    });
+    return;
+  }
+
+  // ── /reminder <natural language> — create reminder ────────
+  const botUserId = cachedBotUserIdRef.value;
+  if (!botUserId) {
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: "Bot is still starting up. Try again in a moment.",
+    });
+    return;
+  }
+
+  let parsed;
+  try {
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+    for (const [key, val] of Object.entries(process.env)) {
+      if (key.startsWith("ENV_") && key.length > 4) {
+        env[key.slice(4)] = val;
+      }
+    }
+
+    const prompt = `Parse this reminder request into JSON. Return ONLY valid JSON, no markdown fences, no explanation.
+
+Input: "${text}"
+
+Current date/time: ${new Date().toISOString()}
+
+Return this exact JSON structure:
+{
+  "content": "the task/action to perform (what the bot should do)",
+  "cron": "standard 5-field cron expression if recurring, or null if one-time",
+  "one_time_at": "ISO 8601 datetime string if one-time, or null if recurring",
+  "is_recurring": true or false
+}
+
+Rules:
+- "every morning at 9am" -> cron "0 9 * * *", is_recurring true
+- "every weekday at 9am" -> cron "0 9 * * 1-5", is_recurring true
+- "every Monday at 10am" -> cron "0 10 * * 1", is_recurring true
+- "in 30 minutes" -> one_time_at (current time + 30 minutes), is_recurring false
+- "tomorrow at 3pm" -> one_time_at (tomorrow 15:00), is_recurring false
+- "content" should be the action part, not the timing part
+- Use 5-field cron (minute hour day-of-month month day-of-week)`;
+
+    const result = execFileSync(CLAUDE_PATH, ["-p", prompt, "--output-format", "text"], {
+      encoding: "utf-8",
+      timeout: 30000,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    // Claude returns raw text — extract JSON from response
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON found in Claude response");
+    parsed = JSON.parse(jsonMatch[0]);
+    log(channelId, `Claude parsed reminder: ${JSON.stringify(parsed)}`);
+  } catch (err) {
+    logErr(channelId, `Failed to parse reminder: ${err.message}`);
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: `Could not understand that reminder. Try being more specific.\nError: ${err.message}`,
+    });
+    return;
+  }
+
+  if (!parsed.content) {
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: "Could not determine what to remind you about. Please try again.",
+    });
+    return;
+  }
+
+  // Compute next_trigger_at
+  let nextTriggerAt;
+  let cronExpression = null;
+  let oneTime = 0;
+
+  if (parsed.is_recurring && parsed.cron) {
+    try {
+      const interval = CronExpressionParser.parse(parsed.cron);
+      nextTriggerAt = toSqliteDatetime(interval.next().toDate());
+      cronExpression = parsed.cron;
+    } catch (err) {
+      logErr(channelId, `Invalid cron expression "${parsed.cron}": ${err.message}`);
+      await client.chat.postEphemeral({
+        channel: channelId,
+        user: userId,
+        text: `Invalid schedule "${parsed.cron}". Please try a different phrasing.`,
+      });
+      return;
+    }
+  } else if (parsed.one_time_at) {
+    const triggerDate = new Date(parsed.one_time_at);
+    if (isNaN(triggerDate.getTime())) {
+      await client.chat.postEphemeral({
+        channel: channelId,
+        user: userId,
+        text: "Could not parse the time. Please try again.",
+      });
+      return;
+    }
+    if (triggerDate <= new Date()) {
+      await client.chat.postEphemeral({
+        channel: channelId,
+        user: userId,
+        text: "That time is in the past. Please specify a future time.",
+      });
+      return;
+    }
+    nextTriggerAt = toSqliteDatetime(triggerDate);
+    oneTime = 1;
+  } else {
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text: "Could not determine when to trigger this reminder. Please try again.",
+    });
+    return;
+  }
+
+  // Store in DB
+  addReminder(channelId, userId, botUserId, parsed.content, text, cronExpression, oneTime, nextTriggerAt);
+  log(channelId, `Reminder created: content="${parsed.content}" cron=${cronExpression} oneTime=${oneTime} next=${nextTriggerAt}`);
+
+  const scheduleDesc = cronExpression
+    ? `Recurring (\`${cronExpression}\`)`
+    : "One-time";
+  await client.chat.postEphemeral({
+    channel: channelId,
+    user: userId,
+    text: `Reminder created!\n*What:* ${parsed.content}\n*Schedule:* ${scheduleDesc}\n*Next trigger:* ${nextTriggerAt}\n*Channel:* <#${channelId}>`,
   });
 });
 
@@ -347,7 +554,7 @@ app.event("app_mention", async ({ event, client }) => {
 
   log(channelId, `app_mention: user=${userId} ts=${event.ts} thread_ts=${threadTs} raw="${rawText}" text="${userText}"`);
 
-  if (ALLOWED_USERS.size > 0 && !ALLOWED_USERS.has(userId)) {
+  if (ALLOWED_USERS.size > 0 && !ALLOWED_USERS.has(userId) && userId !== cachedBotUserIdRef.value) {
     log(channelId, `Blocked unauthorized user=${userId}`);
     return;
   }
@@ -472,6 +679,14 @@ app.event("app_mention", async ({ event, client }) => {
     return;
   }
 
+  await processMessage({ channelId, threadTs, userText, userId, client });
+});
+
+/**
+ * Core message processing: session lookup, CWD gate, worktree setup, Claude spawn.
+ * Called from app_mention handler and reminder polling loop.
+ */
+async function processMessage({ channelId, threadTs, userText, userId, client }) {
   // ── Guard: already processing ─────────────────────────────
   if (activeProcesses.has(threadTs)) {
     log(channelId, `Rejecting — already processing`);
@@ -558,7 +773,7 @@ app.event("app_mention", async ({ event, client }) => {
     activeProcesses,
     cachedTeamId: cachedTeamIdRef.value,
   });
-});
+}
 
 // ── Startup ─────────────────────────────────────────────────
 
@@ -583,13 +798,14 @@ app.event("app_mention", async ({ event, client }) => {
 
   log(null, `Starting Slack bot...`);
 
-  // Cache team ID for chatStream
+  // Cache team ID and bot user ID
   try {
     const authResult = await app.client.auth.test();
     cachedTeamIdRef.value = authResult.team_id;
-    log(null, `Cached team_id: ${cachedTeamIdRef.value}`);
+    cachedBotUserIdRef.value = authResult.user_id;
+    log(null, `Cached team_id: ${cachedTeamIdRef.value}, bot_user_id: ${cachedBotUserIdRef.value}`);
   } catch (err) {
-    logErr(null, `Failed to cache team_id (streaming will use fallback): ${err.message}`);
+    logErr(null, `Failed to cache team_id/bot_user_id: ${err.message}`);
   }
 
   await app.start();
@@ -628,4 +844,57 @@ app.event("app_mention", async ({ event, client }) => {
       logErr(null, `Worktree cleanup error: ${err.message}`);
     }
   }, 60 * 60 * 1000);
+
+  // Reminder polling: fire due reminders
+  async function pollReminders() {
+    try {
+      const due = getDueReminders();
+      if (due.length === 0) return;
+      log(null, `Reminder poll: ${due.length} due reminder(s)`);
+
+      for (const reminder of due) {
+        try {
+          // Post the reminder message in the channel
+          const posted = await app.client.chat.postMessage({
+            channel: reminder.channel_id,
+            text: `<@${reminder.bot_id}> ${reminder.content}`,
+          });
+          log(null, `Reminder #${reminder.id} fired in channel=${reminder.channel_id}: "${reminder.content}"`);
+
+          // Directly process the message (self-mentions don't trigger app_mention)
+          const threadTs = posted.ts;
+          await processMessage({
+            channelId: reminder.channel_id,
+            threadTs,
+            userText: reminder.content,
+            userId: reminder.user_id,
+            client: app.client,
+          });
+
+          if (reminder.one_time) {
+            deactivateReminder(reminder.id);
+            log(null, `Reminder #${reminder.id} deactivated (one-time)`);
+          } else {
+            try {
+              const interval = CronExpressionParser.parse(reminder.cron_expression);
+              const nextTrigger = toSqliteDatetime(interval.next().toDate());
+              updateNextTrigger(nextTrigger, reminder.id);
+              log(null, `Reminder #${reminder.id} next trigger: ${nextTrigger}`);
+            } catch (err) {
+              logErr(null, `Failed to compute next trigger for reminder #${reminder.id}: ${err.message}`);
+              deactivateReminder(reminder.id);
+            }
+          }
+        } catch (err) {
+          logErr(null, `Failed to fire reminder #${reminder.id}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      logErr(null, `Reminder poll error: ${err.message}`);
+    }
+  }
+
+  // Fire any missed reminders immediately, then poll every 60s
+  pollReminders();
+  setInterval(pollReminders, 60 * 1000);
 })();

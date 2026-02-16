@@ -158,6 +158,22 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    bot_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    original_input TEXT NOT NULL,
+    cron_expression TEXT,
+    one_time INTEGER DEFAULT 0,
+    next_trigger_at TEXT NOT NULL,
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
 // ── Prepared statements: sessions ───────────────────────────
 
 const getSession = db.prepare("SELECT * FROM sessions WHERE channel_id = ?");
@@ -208,6 +224,29 @@ const _setChannelDefault = db.prepare(`
     set_by = excluded.set_by,
     updated_at = datetime('now')
 `);
+
+// ── Prepared statements: reminders ───────────────────────────
+
+const _addReminder = db.prepare(`
+  INSERT INTO reminders (channel_id, user_id, bot_id, content, original_input, cron_expression, one_time, next_trigger_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const _getDueReminders = db.prepare(
+  "SELECT * FROM reminders WHERE active = 1 AND next_trigger_at <= datetime('now')"
+);
+
+const _updateNextTrigger = db.prepare(
+  "UPDATE reminders SET next_trigger_at = ? WHERE id = ?"
+);
+
+const _deactivateReminder = db.prepare(
+  "UPDATE reminders SET active = 0 WHERE id = ?"
+);
+
+const _getActiveReminders = db.prepare(
+  "SELECT * FROM reminders WHERE active = 1 AND user_id = ? ORDER BY next_trigger_at"
+);
 
 // ── Prepared statements: team_knowledge ─────────────────────
 
@@ -319,6 +358,14 @@ module.exports = {
   // feedback
   addFeedback: (sessionKey, userId, sentiment, messageTs) =>
     _addFeedback.run(sessionKey, userId, sentiment, messageTs),
+
+  // reminders
+  addReminder: (channelId, userId, botId, content, originalInput, cronExpression, oneTime, nextTriggerAt) =>
+    _addReminder.run(channelId, userId, botId, content, originalInput, cronExpression, oneTime, nextTriggerAt),
+  getDueReminders: () => _getDueReminders.all(),
+  updateNextTrigger: (nextTriggerAt, id) => _updateNextTrigger.run(nextTriggerAt, id),
+  deactivateReminder: (id) => _deactivateReminder.run(id),
+  getActiveReminders: (userId) => _getActiveReminders.all(userId),
 
   db,
 };
