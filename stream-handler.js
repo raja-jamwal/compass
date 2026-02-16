@@ -420,11 +420,37 @@ async function handleClaudeStream(opts) {
         if (stopped) {
           await streamer.append({ markdown_text: "\n\n_Stopped by user._" }).catch(() => {});
         }
-        await streamer.stop({ blocks: finalizationBlocks }).catch((err) => {
+
+        // Stop the stream and capture its message ts
+        let streamMsgTs;
+        try {
+          const stopResponse = await streamer.stop();
+          streamMsgTs = stopResponse.ts;
+          log(channelId, `Stream stopped: streamMsgTs=${streamMsgTs}`);
+        } catch (err) {
           logErr(channelId, `streamer.stop failed: ${err.message}`);
-        });
+        }
+
+        // Delete the stream message and the stop-button carrier
+        if (streamMsgTs) {
+          await client.chat.delete({ channel: channelId, ts: streamMsgTs }).catch((err) => {
+            logErr(channelId, `Failed to delete stream message: ${err.message}`);
+          });
+        }
         await client.chat.delete({ channel: channelId, ts: stopMsgTs }).catch(() => {});
-        log(channelId, `Stream finalized with feedback+disclaimer, stop button deleted`);
+
+        // Post a durable message with the full accumulated text
+        const finalText = stopped
+          ? (accumulatedText ? accumulatedText + "\n\n_Stopped by user._" : "_Stopped by user._")
+          : (accumulatedText || "No response.");
+        await client.chat.postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: finalText,
+          blocks: [...buildBlocks(finalText, threadTs, false), ...finalizationBlocks],
+        }).catch((err) => logErr(channelId, `Final postMessage failed: ${err.message}`));
+
+        log(channelId, `Stream replaced with durable message (${finalText.length} chars)`);
       } else if (!streamFailed && !streamerActive) {
         const text = stopped
           ? "_Stopped by user._"
