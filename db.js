@@ -28,6 +28,15 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS channel_defaults (
+    channel_id TEXT PRIMARY KEY,
+    cwd TEXT NOT NULL,
+    set_by TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
 // ── Phase 1 tables ──────────────────────────────────────────
 
 db.exec(`
@@ -185,6 +194,21 @@ const getAllActiveSessions = db.prepare(
   "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 20"
 );
 
+// ── Prepared statements: channel_defaults ───────────────────
+
+const _getChannelDefault = db.prepare(
+  "SELECT * FROM channel_defaults WHERE channel_id = ?"
+);
+
+const _setChannelDefault = db.prepare(`
+  INSERT INTO channel_defaults (channel_id, cwd, set_by)
+  VALUES (?, ?, ?)
+  ON CONFLICT(channel_id) DO UPDATE SET
+    cwd = excluded.cwd,
+    set_by = excluded.set_by,
+    updated_at = datetime('now')
+`);
+
 // ── Prepared statements: team_knowledge ─────────────────────
 
 const _addTeaching = db.prepare(`
@@ -267,6 +291,10 @@ module.exports = {
   getCwdHistory: () => getCwdHistory.all(),
   addCwdHistory: (p) => addCwdHistory.run(p),
   getAllActiveSessions: () => getAllActiveSessions.all(),
+
+  // channel_defaults
+  getChannelDefault: (channelId) => _getChannelDefault.get(channelId),
+  setChannelDefault: (channelId, cwd, setBy) => _setChannelDefault.run(channelId, cwd, setBy),
 
   // team_knowledge
   addTeaching: (instruction, addedBy, workspaceId = "default") => _addTeaching.run(instruction, addedBy, workspaceId),

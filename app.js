@@ -4,6 +4,7 @@ const fs = require("fs");
 const { execFileSync } = require("child_process");
 const {
   getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,
+  getChannelDefault, setChannelDefault,
   addTeaching, getTeachings, removeTeaching,
   getStaleWorktrees, getActiveWorktrees, markWorktreeCleaned,
   addFeedback, getWorktree, touchWorktree, upsertWorktree,
@@ -81,6 +82,7 @@ app.action("cwd_pick", async ({ action, ack, client, body }) => {
   const channelId = body.channel?.id || body.container?.channel_id;
   const threadTs = body.message?.thread_ts || body.message?.ts;
   const chosenPath = action.selected_option.value;
+  const isTopLevel = action.block_id === "cwd_picker_block_toplevel";
 
   const sessionKey = threadTs || channelId;
   if (!getSession(sessionKey)) {
@@ -88,12 +90,20 @@ app.action("cwd_pick", async ({ action, ack, client, body }) => {
   }
   setCwd(sessionKey, chosenPath);
   addCwdHistory(chosenPath);
-  log(channelId, `CWD set via picker to: ${chosenPath} (thread=${threadTs})`);
+  if (isTopLevel) {
+    setChannelDefault(channelId, chosenPath, body.user?.id);
+    log(channelId, `Channel default CWD set via picker to: ${chosenPath}`);
+  } else {
+    log(channelId, `CWD set via picker to: ${chosenPath} (thread=${threadTs})`);
+  }
 
+  const confirmText = isTopLevel
+    ? `Working directory set to \`${chosenPath}\` (default for this channel)`
+    : `Working directory set to \`${chosenPath}\``;
   await client.chat.postMessage({
     channel: channelId,
     thread_ts: threadTs,
-    text: `Working directory set to \`${chosenPath}\``,
+    text: confirmText,
   });
 });
 
@@ -171,7 +181,7 @@ app.command("/cwd", async ({ command, ack, client }) => {
     view: {
       type: "modal",
       callback_id: "cwd_modal",
-      private_metadata: JSON.stringify({ channelId: command.channel_id }),
+      private_metadata: JSON.stringify({ channelId: command.channel_id, isTopLevel: true }),
       title: { type: "plain_text", text: "Set Working Directory" },
       submit: { type: "plain_text", text: "Set" },
       close: { type: "plain_text", text: "Cancel" },
@@ -184,7 +194,7 @@ app.command("/cwd", async ({ command, ack, client }) => {
 
 app.view("cwd_modal", async ({ view, ack, client }) => {
   const meta = JSON.parse(view.private_metadata);
-  const { channelId, threadTs } = meta;
+  const { channelId, threadTs, isTopLevel } = meta;
   const values = view.state.values;
 
   const inputVal = values.cwd_input_block?.cwd_input?.value;
@@ -203,18 +213,29 @@ app.view("cwd_modal", async ({ view, ack, client }) => {
 
   await ack();
 
-  const sessionKey = threadTs || channelId;
-  if (!getSession(sessionKey)) {
-    upsertSession(sessionKey, "pending");
-  }
-  setCwd(sessionKey, chosenPath);
   addCwdHistory(chosenPath);
-  log(channelId, `CWD set to: ${chosenPath} (thread=${threadTs})`);
+  if (isTopLevel) {
+    setChannelDefault(channelId, chosenPath, view.user?.id);
+    log(channelId, `Channel default CWD set to: ${chosenPath}`);
+    // Also set thread session CWD if we're in a thread (top-level $cwd in channel)
+    if (threadTs) {
+      if (!getSession(threadTs)) upsertSession(threadTs, "pending");
+      setCwd(threadTs, chosenPath);
+    }
+  } else {
+    const sessionKey = threadTs || channelId;
+    if (!getSession(sessionKey)) upsertSession(sessionKey, "pending");
+    setCwd(sessionKey, chosenPath);
+    log(channelId, `CWD set to: ${chosenPath} (thread=${threadTs})`);
+  }
 
+  const confirmText = isTopLevel
+    ? `Working directory set to \`${chosenPath}\` (default for this channel)`
+    : `Working directory set to \`${chosenPath}\``;
   await client.chat.postMessage({
     channel: channelId,
     thread_ts: threadTs,
-    text: `Working directory set to \`${chosenPath}\``,
+    text: confirmText,
   });
 });
 
@@ -334,14 +355,23 @@ app.event("app_mention", async ({ event, client }) => {
   // ── $cwd command ──────────────────────────────────────────
   if (userText.match(/^\$cwd(\s|$)/i)) {
     const pathArg = userText.replace(/^\$cwd\s*/i, "").trim();
-    log(channelId, `$cwd command: pathArg="${pathArg}"`);
+    const isTopLevel = !event.thread_ts;
+    log(channelId, `$cwd command: pathArg="${pathArg}" isTopLevel=${isTopLevel}`);
     if (pathArg) {
       if (!getSession(threadTs)) upsertSession(threadTs, "pending");
       setCwd(threadTs, pathArg);
       addCwdHistory(pathArg);
-      log(channelId, `CWD set via $cwd to: ${pathArg}`);
+      if (isTopLevel) {
+        setChannelDefault(channelId, pathArg, userId);
+        log(channelId, `Channel default CWD set to: ${pathArg}`);
+      } else {
+        log(channelId, `Thread CWD set to: ${pathArg}`);
+      }
+      const confirmText = isTopLevel
+        ? `Working directory set to \`${pathArg}\` (default for this channel)`
+        : `Working directory set to \`${pathArg}\``;
       try {
-        await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `Working directory set to \`${pathArg}\`` });
+        await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: confirmText });
       } catch (err) {
         logErr(channelId, `$cwd set reply failed: ${err.message}`);
       }
@@ -360,7 +390,7 @@ app.event("app_mention", async ({ event, client }) => {
           { type: "section", text: { type: "mrkdwn", text: "*Recent directories:*" } },
           {
             type: "actions",
-            block_id: "cwd_picker_block",
+            block_id: isTopLevel ? "cwd_picker_block_toplevel" : "cwd_picker_block",
             elements: [{
               type: "static_select",
               action_id: "cwd_pick",
@@ -384,7 +414,7 @@ app.event("app_mention", async ({ event, client }) => {
             action_id: "cwd_add_new",
             text: { type: "plain_text", text: "Add new..." },
             style: "primary",
-            value: JSON.stringify({ channelId, threadTs }),
+            value: JSON.stringify({ channelId, threadTs, isTopLevel }),
           },
         },
         {
@@ -472,9 +502,22 @@ app.event("app_mention", async ({ event, client }) => {
     log(channelId, `New session: ${sessionId}`);
   }
 
-  // ── CWD gate ──────────────────────────────────────────────
+  // ── CWD gate (thread CWD → channel default → block) ─────
   const currentSession = getSession(threadTs);
-  if (!currentSession?.cwd) {
+  let effectiveCwd = currentSession?.cwd;
+
+  if (!effectiveCwd) {
+    const channelDefault = getChannelDefault(channelId);
+    if (channelDefault?.cwd) {
+      effectiveCwd = channelDefault.cwd;
+      // Inherit: write channel default into this thread's session
+      if (!currentSession) upsertSession(threadTs, "pending");
+      setCwd(threadTs, effectiveCwd);
+      log(channelId, `Inherited channel default CWD: ${effectiveCwd}`);
+    }
+  }
+
+  if (!effectiveCwd) {
     log(channelId, `No CWD set, blocking`);
     try {
       await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: "No working directory set. Send `$cwd /path/to/dir` to set one." });
@@ -485,19 +528,19 @@ app.event("app_mention", async ({ event, client }) => {
   }
 
   // ── Worktree setup ────────────────────────────────────────
-  let spawnCwd = currentSession.cwd;
+  let spawnCwd = effectiveCwd;
   const existingWt = getWorktree(threadTs);
   if (existingWt && !existingWt.cleaned_up) {
     spawnCwd = existingWt.worktree_path;
     touchWorktree(threadTs);
     log(channelId, `Reusing worktree: ${spawnCwd}`);
   } else {
-    const gitInfo = detectGitRepo(currentSession.cwd);
-    log(channelId, `Git detection: cwd=${currentSession.cwd} isGit=${gitInfo.isGit}`);
+    const gitInfo = detectGitRepo(effectiveCwd);
+    log(channelId, `Git detection: cwd=${effectiveCwd} isGit=${gitInfo.isGit}`);
     if (gitInfo.isGit) {
       try {
         const { worktreePath, branchName } = createWorktree(gitInfo.repoRoot, threadTs);
-        copyEnvFiles(currentSession.cwd, worktreePath);
+        copyEnvFiles(effectiveCwd, worktreePath);
         upsertWorktree(threadTs, gitInfo.repoRoot, worktreePath, branchName);
         spawnCwd = worktreePath;
         log(channelId, `Created worktree: ${worktreePath}`);
