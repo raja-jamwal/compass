@@ -10,6 +10,11 @@ features:
   bot_user:
     display_name: claude-slacker
     always_online: true
+  slash_commands:
+    - command: /cwd
+      description: Set the default working directory for this channel
+      usage_hint: /cwd
+      should_escape: false
   assistant_view:
     assistant_description: Claude Code agent — runs on your local machine with full filesystem access
     suggested_prompts:
