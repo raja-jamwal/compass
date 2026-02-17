@@ -126,7 +126,7 @@ Leave empty or unset to allow all users.
 
 ### Prerequisites
 
-- Node.js 18+
+- [Bun](https://bun.sh) runtime
 - [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 - A Slack workspace where you can create apps
 
@@ -149,10 +149,10 @@ ALLOWED_USERS=U096GJFBZ54
 EOF
 ```
 
-### 3. Run with npx
+### 3. Run
 
 ```bash
-npx claude-slacker
+bunx claude-slacker
 ```
 
 That's it. The bot connects via Socket Mode — no ngrok or public URL needed.
@@ -160,13 +160,13 @@ That's it. The bot connects via Socket Mode — no ngrok or public URL needed.
 You can also point to a specific env file:
 
 ```bash
-npx claude-slacker --env-file /path/to/.env
+bunx claude-slacker --env-file /path/to/.env
 ```
 
 Or pass tokens directly as environment variables:
 
 ```bash
-SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... npx claude-slacker
+SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... bunx claude-slacker
 ```
 
 #### Alternative: clone and run locally
@@ -177,8 +177,8 @@ If you prefer to run from source:
 git clone https://github.com/anthropics/claude-slacker.git
 cd claude-slacker
 cp .env.example .env   # edit with your tokens
-npm install
-npm start
+bun install
+bun start
 ```
 
 #### Environment loading precedence
@@ -201,14 +201,22 @@ When multiple sources provide the same variable, higher priority wins:
 ## Architecture
 
 ```
-app.js              Registration hub — Bolt app, actions, modals, App Home, startup
-assistant.js        Assistant handlers — threadStarted, userMessage, commands
-stream-handler.js   Claude CLI streaming — NDJSON parsing, task chunks, usage logging
-blocks.js           Block Kit builders — stop button, feedback, disclaimer, prompts, dashboard
-db.js               SQLite schema (11 tables) and prepared statement exports
-worktree.js         Git worktree lifecycle operations (create, remove, detect)
-manifest.yml        Slack app manifest (scopes, events, features)
-sessions.db         SQLite database (auto-created on first run)
+src/
+  app.ts                 Entry point — Bolt app, actions, modals, App Home, startup
+  db.ts                  SQLite schema (11 tables) and typed prepared statement exports (bun:sqlite)
+  types.ts               Shared TypeScript interfaces (row types, runtime types)
+  handlers/
+    assistant.ts         Assistant handlers — threadStarted, userMessage, commands
+    stream.ts            Claude CLI streaming — NDJSON parsing, task chunks, usage logging
+  ui/
+    blocks.ts            Block Kit builders — stop button, feedback, disclaimer, prompts, dashboard
+  lib/
+    log.ts               Shared logging helpers (ts, log, logErr, toSqliteDatetime)
+    worktree.ts          Git worktree lifecycle operations (create, remove, detect)
+  mcp/
+    server.ts            MCP server — reminders, teachings, channel CWD tools
+manifest.yml             Slack app manifest (scopes, events, features)
+sessions.db              SQLite database (auto-created on first run)
 ```
 
 ### Database tables
