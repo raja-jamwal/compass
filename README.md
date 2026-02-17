@@ -141,24 +141,54 @@ Leave empty or unset to allow all users.
 ### 2. Configure environment
 
 ```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-```
+mkdir -p ~/.claude-slacker
+cat > ~/.claude-slacker/.env << 'EOF'
 SLACK_APP_TOKEN=xapp-1-...
 SLACK_BOT_TOKEN=xoxb-...
 ALLOWED_USERS=U096GJFBZ54
+EOF
 ```
 
-### 3. Install and run
+### 3. Run with npx
 
 ```bash
+npx claude-slacker
+```
+
+That's it. The bot connects via Socket Mode — no ngrok or public URL needed.
+
+You can also point to a specific env file:
+
+```bash
+npx claude-slacker --env-file /path/to/.env
+```
+
+Or pass tokens directly as environment variables:
+
+```bash
+SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... npx claude-slacker
+```
+
+#### Alternative: clone and run locally
+
+If you prefer to run from source:
+
+```bash
+git clone https://github.com/anthropics/claude-slacker.git
+cd claude-slacker
+cp .env.example .env   # edit with your tokens
 npm install
 npm start
 ```
 
-The bot connects via Socket Mode — no ngrok or public URL needed.
+#### Environment loading precedence
+
+When multiple sources provide the same variable, higher priority wins:
+
+1. Real environment variables (highest)
+2. `--env-file <path>`
+3. `~/.claude-slacker/.env`
+4. Local `.env` in the current directory (lowest)
 
 ### 4. Verify
 

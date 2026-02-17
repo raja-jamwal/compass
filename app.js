@@ -1,6 +1,37 @@
-require("dotenv").config();
-const { App } = require("@slack/bolt");
+#!/usr/bin/env node
+
+const path = require("path");
 const fs = require("fs");
+
+// --- Environment loading (precedence: real env > --env-file > ~/.claude-slacker/.env > local .env) ---
+// Snapshot real env vars so we can restore them after file-based loading
+const realEnv = { ...process.env };
+
+// 1. Local .env (lowest priority)
+require("dotenv").config();
+
+// 2. Home-dir config (overrides local .env)
+const homeEnv = path.join(require("os").homedir(), ".claude-slacker", ".env");
+if (fs.existsSync(homeEnv)) {
+  require("dotenv").config({ path: homeEnv, override: true });
+}
+
+// 3. --env-file flag (overrides home-dir)
+const envFileIdx = process.argv.indexOf("--env-file");
+if (envFileIdx !== -1 && process.argv[envFileIdx + 1]) {
+  const custom = path.resolve(process.argv[envFileIdx + 1]);
+  if (!fs.existsSync(custom)) {
+    console.error(`Error: env file not found: ${custom}`);
+    process.exit(1);
+  }
+  require("dotenv").config({ path: custom, override: true });
+}
+
+// 4. Restore real env vars (always highest priority)
+Object.assign(process.env, realEnv);
+// -----------------------------------------------------------------------------------------
+
+const { App } = require("@slack/bolt");
 const { execFileSync } = require("child_process");
 const {
   getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,

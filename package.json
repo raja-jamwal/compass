@@ -1,10 +1,15 @@
 {
-  "name": "slack-app",
-  "version": "1.0.0",
-  "private": true,
+  "name": "claude-slacker",
+  "version": "0.1.0",
+  "description": "Bring Claude Code to your Slack workspace — per-thread AI coding sessions with full local filesystem access",
+  "bin": {
+    "claude-slacker": "app.js"
+  },
   "scripts": {
     "start": "node app.js"
   },
+  "keywords": ["slack", "claude", "ai", "coding-assistant", "claude-code"],
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@slack/bolt": "^4.1.0",
