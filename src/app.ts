@@ -622,21 +622,17 @@ async function processMessage({ channelId, threadTs, userText, userId, client }:
 (async () => {
   // Validate CLAUDE_PATH exists before starting
   const claudePath = process.env.CLAUDE_PATH || "claude";
-  try {
-    // Check if it's an absolute path that exists, or resolve via which
-    if (claudePath.startsWith("/")) {
-      if (!fs.existsSync(claudePath)) {
-        console.error(`ERROR: CLAUDE_PATH not found: ${claudePath}`);
-        process.exit(1);
-      }
-    } else {
-      execFileSync("which", [claudePath], { stdio: ["pipe", "pipe", "pipe"] });
+  // Check if it's an absolute path that exists, or resolve via Bun.which
+  if (path.isAbsolute(claudePath)) {
+    if (!fs.existsSync(claudePath)) {
+      console.error(`ERROR: CLAUDE_PATH not found: ${claudePath}`);
+      process.exit(1);
     }
-    log(null, `Claude CLI found: ${claudePath}`);
-  } catch {
+  } else if (!Bun.which(claudePath)) {
     console.error(`ERROR: CLAUDE_PATH "${claudePath}" not found in PATH. Set CLAUDE_PATH in .env to the full path of the claude binary.`);
     process.exit(1);
   }
+  log(null, `Claude CLI found: ${claudePath}`);
 
   // Register MCP server (idempotent — overwrites if already exists)
   try {
