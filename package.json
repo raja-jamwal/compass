@@ -7,7 +7,8 @@
     "claude-slacker": "src/app.ts"
   },
   "scripts": {
-    "start": "bun src/app.ts"
+    "start": "bun src/app.ts",
+    "test": "bun test"
   },
   "keywords": ["slack", "claude", "ai", "coding-assistant", "claude-code"],
   "license": "MIT",

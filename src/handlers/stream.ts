@@ -29,7 +29,7 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   Task: "is delegating a task...",
 };
 
-function toolTitle(toolName: string, toolInput: any): string {
+export function toolTitle(toolName: string, toolInput: any): string {
   try {
     switch (toolName) {
       case "Read":
