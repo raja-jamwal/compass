@@ -369,6 +369,9 @@ async function handleClaudeStream(opts) {
           resultData = data;
           const elapsed = Date.now() - startTime;
           log(channelId, `stream: result subtype=${data.subtype} is_error=${data.is_error} duration_ms=${data.duration_ms} turns=${data.num_turns} cost=$${data.total_cost_usd?.toFixed(4)} session=${data.session_id}`);
+          if (data.is_error && data.result) {
+            logErr(channelId, `stream: error detail: ${typeof data.result === "string" ? data.result : JSON.stringify(data.result)}`);
+          }
           log(channelId, `stream: total deltas=${deltaCount}, slack updates=${updateCount}, wall_time=${elapsed}ms`);
         } else {
           log(channelId, `stream: unknown type=${data.type}`);

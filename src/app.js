@@ -124,11 +124,14 @@ app.action("cwd_pick", async ({ action, ack, client, body }) => {
   }
   setCwd(sessionKey, chosenPath);
   addCwdHistory(chosenPath);
+  // Reset session so next message starts fresh (can't --resume in a different CWD)
+  upsertSession(sessionKey, "pending");
+  markWorktreeCleaned(sessionKey);
   if (isTopLevel) {
     setChannelDefault(channelId, chosenPath, body.user?.id);
-    log(channelId, `Channel default CWD set via picker to: ${chosenPath}`);
+    log(channelId, `Channel default CWD set via picker to: ${chosenPath} (session reset)`);
   } else {
-    log(channelId, `CWD set via picker to: ${chosenPath} (thread=${threadTs})`);
+    log(channelId, `CWD set via picker to: ${chosenPath} (thread=${threadTs}, session reset)`);
   }
 
   const confirmText = isTopLevel
@@ -263,12 +266,18 @@ app.view("cwd_modal", async ({ view, ack, client }) => {
     if (threadTs) {
       if (!getSession(threadTs)) upsertSession(threadTs, "pending");
       setCwd(threadTs, chosenPath);
+      // Reset session so next message starts fresh
+      upsertSession(threadTs, "pending");
+      markWorktreeCleaned(threadTs);
     }
   } else {
     const sessionKey = threadTs || channelId;
     if (!getSession(sessionKey)) upsertSession(sessionKey, "pending");
     setCwd(sessionKey, chosenPath);
-    log(channelId, `CWD set to: ${chosenPath} (thread=${threadTs})`);
+    // Reset session so next message starts fresh
+    upsertSession(sessionKey, "pending");
+    markWorktreeCleaned(sessionKey);
+    log(channelId, `CWD set to: ${chosenPath} (thread=${threadTs}, session reset)`);
   }
 
   const confirmText = isTopLevel
@@ -403,11 +412,14 @@ app.event("app_mention", async ({ event, client }) => {
       if (!getSession(threadTs)) upsertSession(threadTs, "pending");
       setCwd(threadTs, pathArg);
       addCwdHistory(pathArg);
+      // Reset session so next message starts fresh (can't --resume in a different CWD)
+      upsertSession(threadTs, "pending");
+      markWorktreeCleaned(threadTs);
       if (isTopLevel) {
         setChannelDefault(channelId, pathArg, userId);
-        log(channelId, `Channel default CWD set to: ${pathArg}`);
+        log(channelId, `Channel default CWD set to: ${pathArg} (session reset)`);
       } else {
-        log(channelId, `Thread CWD set to: ${pathArg}`);
+        log(channelId, `Thread CWD set to: ${pathArg} (session reset)`);
       }
       const confirmText = isTopLevel
         ? `Working directory set to \`${pathArg}\` (default for this channel)`

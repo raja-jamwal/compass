@@ -11,7 +11,7 @@ const { randomUUID } = require("crypto");
 const {
   getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,
   addTeaching, getTeachings, removeTeaching, getTeachingCount,
-  getWorktree, touchWorktree, upsertWorktree,
+  getWorktree, touchWorktree, upsertWorktree, markWorktreeCleaned,
 } = require("../db");
 const {
   detectGitRepo, createWorktree, copyEnvFiles,
@@ -84,7 +84,10 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
           }
           setCwd(threadTs, pathArg);
           addCwdHistory(pathArg);
-          log(channelId, `CWD set via $cwd to: ${pathArg}`);
+          // Reset session so next message starts fresh (can't --resume in a different CWD)
+          upsertSession(threadTs, "pending");
+          markWorktreeCleaned(threadTs);
+          log(channelId, `CWD set via $cwd to: ${pathArg} (session reset)`);
           try {
             await say(`Working directory set to \`${pathArg}\``);
             // Update suggested prompts with CWD context
