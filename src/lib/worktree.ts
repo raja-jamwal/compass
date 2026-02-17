@@ -1,13 +1,9 @@
-const { execFileSync } = require("child_process");
-const path = require("path");
-const fs = require("fs");
+import { execFileSync } from "child_process";
+import path from "path";
+import fs from "fs";
+import type { GitInfo, WorktreeResult } from "../types.ts";
 
-/**
- * Check if a path is inside a git repository.
- * @param {string} cwd
- * @returns {{ isGit: boolean, repoRoot: string|null }}
- */
-function detectGitRepo(cwd) {
+export function detectGitRepo(cwd: string): GitInfo {
   try {
     const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
       cwd,
@@ -20,23 +16,11 @@ function detectGitRepo(cwd) {
   }
 }
 
-/**
- * Generate a branch name from a thread timestamp.
- * @param {string} threadTs - e.g. "1707900000.123456"
- * @returns {string} - e.g. "slack/1707900000-123456"
- */
-function branchNameFromThread(threadTs) {
+export function branchNameFromThread(threadTs: string): string {
   return `slack/${threadTs.replace(".", "-")}`;
 }
 
-/**
- * Create a worktree for a thread.
- * @param {string} repoRoot - path to the repo root
- * @param {string} threadTs - thread timestamp as worktree key
- * @param {string} baseBranch - branch to fork from (default: current HEAD)
- * @returns {{ worktreePath: string, branchName: string }}
- */
-function createWorktree(repoRoot, threadTs, baseBranch) {
+export function createWorktree(repoRoot: string, threadTs: string, baseBranch?: string): WorktreeResult {
   const branchName = branchNameFromThread(threadTs);
   const treesDir = path.join(repoRoot, "trees");
   const wtPath = path.join(treesDir, branchName.replace(/\//g, "-"));
@@ -45,7 +29,6 @@ function createWorktree(repoRoot, threadTs, baseBranch) {
     fs.mkdirSync(treesDir, { recursive: true });
   }
 
-  // Determine base branch if not specified
   if (!baseBranch) {
     try {
       baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
@@ -75,13 +58,7 @@ function createWorktree(repoRoot, threadTs, baseBranch) {
   return { worktreePath: wtPath, branchName };
 }
 
-/**
- * Remove a worktree and its branch.
- * @param {string} repoRoot
- * @param {string} worktreePath
- * @param {string} branchName
- */
-function removeWorktree(repoRoot, worktreePath, branchName) {
+export function removeWorktree(repoRoot: string, worktreePath: string, branchName: string): void {
   try {
     execFileSync("git", ["worktree", "unlock", worktreePath], {
       cwd: repoRoot,
@@ -102,12 +79,7 @@ function removeWorktree(repoRoot, worktreePath, branchName) {
   } catch {}
 }
 
-/**
- * Check if a worktree has uncommitted changes.
- * @param {string} worktreePath
- * @returns {boolean}
- */
-function hasUncommittedChanges(worktreePath) {
+export function hasUncommittedChanges(worktreePath: string): boolean {
   try {
     const status = execFileSync("git", ["status", "--porcelain"], {
       cwd: worktreePath,
@@ -120,12 +92,7 @@ function hasUncommittedChanges(worktreePath) {
   }
 }
 
-/**
- * Copy .env files from source to target directory.
- * @param {string} sourceDir
- * @param {string} targetDir
- */
-function copyEnvFiles(sourceDir, targetDir) {
+export function copyEnvFiles(sourceDir: string, targetDir: string): void {
   const envFiles = [".env", ".env.local", ".env.development"];
   for (const f of envFiles) {
     const src = path.join(sourceDir, f);
@@ -134,12 +101,3 @@ function copyEnvFiles(sourceDir, targetDir) {
     }
   }
 }
-
-module.exports = {
-  detectGitRepo,
-  branchNameFromThread,
-  createWorktree,
-  removeWorktree,
-  hasUncommittedChanges,
-  copyEnvFiles,
-};

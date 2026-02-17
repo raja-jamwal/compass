@@ -1,20 +1,10 @@
-/**
- * Block Kit builders for Slack messages.
- */
-
-const {
+import {
   getAllActiveSessions, getTeachings, getActiveWorktrees, getRecentUsage,
-} = require("../db");
+} from "../db.ts";
+import type { ActiveProcessMap } from "../types.ts";
 
-/**
- * Build message blocks with text and an optional Stop button.
- * @param {string} text - Markdown text
- * @param {string} threadKey - Thread key for stop button value
- * @param {boolean} showStop - Whether to show the stop button
- * @returns {Array}
- */
-function buildBlocks(text, threadKey, showStop) {
-  const blocks = [
+export function buildBlocks(text: string, threadKey: string, showStop: boolean): any[] {
+  const blocks: any[] = [
     { type: "section", text: { type: "mrkdwn", text: text || " " } },
   ];
   if (showStop) {
@@ -34,12 +24,7 @@ function buildBlocks(text, threadKey, showStop) {
   return blocks;
 }
 
-/**
- * Build a stop-button-only block (for the carrier message during streaming).
- * @param {string} threadKey
- * @returns {Array}
- */
-function buildStopOnlyBlocks(threadKey) {
+export function buildStopOnlyBlocks(threadKey: string): any[] {
   return [{
     type: "actions",
     elements: [{
@@ -52,13 +37,7 @@ function buildStopOnlyBlocks(threadKey) {
   }];
 }
 
-/**
- * Build feedback block with thumbs up/down buttons.
- * Uses context_actions + feedback_buttons for Slack AI feedback pattern.
- * @param {string} sessionKey
- * @returns {object}
- */
-function buildFeedbackBlock(sessionKey) {
+export function buildFeedbackBlock(sessionKey: string): any {
   return {
     type: "context_actions",
     elements: [{
@@ -76,11 +55,7 @@ function buildFeedbackBlock(sessionKey) {
   };
 }
 
-/**
- * Build disclaimer context block for LLM-generated responses.
- * @returns {object}
- */
-function buildDisclaimerBlock() {
+export function buildDisclaimerBlock(): any {
   return {
     type: "context",
     elements: [{
@@ -90,12 +65,7 @@ function buildDisclaimerBlock() {
   };
 }
 
-/**
- * Build suggested prompts for assistant thread start.
- * @param {string|null} cwd - Working directory if set
- * @returns {{ prompts: Array, title: string }}
- */
-function buildSuggestedPrompts(cwd) {
+export function buildSuggestedPrompts(cwd: string | null): { prompts: any[]; title: string } {
   return {
     prompts: [
       {
@@ -119,18 +89,13 @@ function buildSuggestedPrompts(cwd) {
   };
 }
 
-/**
- * Build App Home dashboard blocks.
- * @param {Map} activeProcesses - Map of active processes
- * @returns {Array}
- */
-function buildHomeBlocks(activeProcesses) {
+export function buildHomeBlocks(activeProcesses: ActiveProcessMap): any[] {
   const sessions = getAllActiveSessions();
   const teachings = getTeachings("default");
   const worktrees = getActiveWorktrees();
   const recentUsage = getRecentUsage(5);
 
-  const blocks = [
+  const blocks: any[] = [
     { type: "header", text: { type: "plain_text", text: "Claude Code Dashboard" } },
     { type: "context", elements: [{ type: "mrkdwn", text: `Last updated: ${new Date().toLocaleString()}` }] },
     { type: "divider" },
@@ -188,12 +153,3 @@ function buildHomeBlocks(activeProcesses) {
 
   return blocks;
 }
-
-module.exports = {
-  buildBlocks,
-  buildStopOnlyBlocks,
-  buildFeedbackBlock,
-  buildDisclaimerBlock,
-  buildSuggestedPrompts,
-  buildHomeBlocks,
-};

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 /**
  * Claude-slacker MCP Server
@@ -7,17 +7,17 @@
  * Can run standalone or be spawned by the Claude CLI as an MCP server.
  *
  * Usage:
- *   node mcp-server.js            # stdio transport (for Claude CLI)
- *   ./setup.sh                    # register in user MCP config
+ *   bun src/mcp/server.ts           # stdio transport (for Claude CLI)
  */
 
-const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
-const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
-const z = require("zod");
-const { CronExpressionParser } = require("cron-parser");
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { CronExpressionParser } from "cron-parser";
+import { toSqliteDatetime } from "../lib/log.ts";
 
 // ── Database ────────────────────────────────────────────────
-const {
+import {
   addReminder,
   getDueReminders,
   updateNextTrigger,
@@ -29,14 +29,7 @@ const {
   getTeachingCount,
   getChannelDefault,
   setChannelDefault,
-} = require("../db");
-
-// ── Helpers ─────────────────────────────────────────────────
-
-function toSqliteDatetime(d) {
-  const date = typeof d === "string" ? new Date(d) : d;
-  return date.toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
-}
+} from "../db.ts";
 
 // Context defaults from env (injected by stream-handler when spawning Claude CLI)
 const DEFAULT_CHANNEL_ID = process.env.SLACK_CHANNEL_ID || null;
@@ -72,23 +65,23 @@ server.registerTool(
         .describe("ISO 8601 datetime for one-time reminders (e.g. '2026-02-17T15:00:00Z')"),
     },
   },
-  async (params) => {
+  async (params: any) => {
     const channel_id = params.channel_id || DEFAULT_CHANNEL_ID;
     const user_id = params.user_id || DEFAULT_USER_ID;
     const bot_id = params.bot_id || DEFAULT_BOT_USER_ID;
 
     if (!channel_id || !user_id || !bot_id) {
-      return { content: [{ type: "text", text: "Error: Missing channel_id, user_id, or bot_id and no session context available." }] };
+      return { content: [{ type: "text" as const, text: "Error: Missing channel_id, user_id, or bot_id and no session context available." }] };
     }
 
     const { content, cron, one_time_at } = params;
 
     if (!cron && !one_time_at) {
-      return { content: [{ type: "text", text: "Error: Provide either 'cron' (recurring) or 'one_time_at' (one-time)." }] };
+      return { content: [{ type: "text" as const, text: "Error: Provide either 'cron' (recurring) or 'one_time_at' (one-time)." }] };
     }
 
-    let nextTriggerAt;
-    let cronExpression = null;
+    let nextTriggerAt: string;
+    let cronExpression: string | null = null;
     let oneTime = 0;
 
     if (cron) {
@@ -96,16 +89,16 @@ server.registerTool(
         const interval = CronExpressionParser.parse(cron);
         nextTriggerAt = toSqliteDatetime(interval.next().toDate());
         cronExpression = cron;
-      } catch (err) {
-        return { content: [{ type: "text", text: `Error: Invalid cron expression "${cron}": ${err.message}` }] };
+      } catch (err: any) {
+        return { content: [{ type: "text" as const, text: `Error: Invalid cron expression "${cron}": ${err.message}` }] };
       }
     } else {
       const triggerDate = new Date(one_time_at);
       if (isNaN(triggerDate.getTime())) {
-        return { content: [{ type: "text", text: `Error: Invalid datetime "${one_time_at}".` }] };
+        return { content: [{ type: "text" as const, text: `Error: Invalid datetime "${one_time_at}".` }] };
       }
       if (triggerDate <= new Date()) {
-        return { content: [{ type: "text", text: "Error: That time is in the past. Specify a future time." }] };
+        return { content: [{ type: "text" as const, text: "Error: That time is in the past. Specify a future time." }] };
       }
       nextTriggerAt = toSqliteDatetime(triggerDate);
       oneTime = 1;
@@ -118,7 +111,7 @@ server.registerTool(
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `Reminder created.\nContent: ${content}\nSchedule: ${scheduleDesc}\nNext trigger: ${nextTriggerAt}\nChannel: ${channel_id}`,
         },
       ],
@@ -134,14 +127,14 @@ server.registerTool(
       user_id: z.string().optional().describe("Slack user ID (auto-detected from session context)"),
     },
   },
-  async (params) => {
+  async (params: any) => {
     const user_id = params.user_id || DEFAULT_USER_ID;
     if (!user_id) {
-      return { content: [{ type: "text", text: "Error: Missing user_id and no session context available." }] };
+      return { content: [{ type: "text" as const, text: "Error: Missing user_id and no session context available." }] };
     }
     const reminders = getActiveReminders(user_id);
     if (reminders.length === 0) {
-      return { content: [{ type: "text", text: "No active reminders." }] };
+      return { content: [{ type: "text" as const, text: "No active reminders." }] };
     }
 
     const lines = reminders.map((r) => {
@@ -149,7 +142,7 @@ server.registerTool(
       return `#${r.id} — ${r.content} (${schedule}, next: ${r.next_trigger_at}, channel: ${r.channel_id})`;
     });
 
-    return { content: [{ type: "text", text: `Active reminders:\n${lines.join("\n")}` }] };
+    return { content: [{ type: "text" as const, text: `Active reminders:\n${lines.join("\n")}` }] };
   }
 );
 
@@ -161,9 +154,9 @@ server.registerTool(
       reminder_id: z.number().describe("The reminder ID to deactivate"),
     },
   },
-  async ({ reminder_id }) => {
+  async ({ reminder_id }: any) => {
     deactivateReminder(reminder_id);
-    return { content: [{ type: "text", text: `Reminder #${reminder_id} deactivated.` }] };
+    return { content: [{ type: "text" as const, text: `Reminder #${reminder_id} deactivated.` }] };
   }
 );
 
@@ -180,15 +173,15 @@ server.registerTool(
       workspace_id: z.string().optional().describe("Workspace ID (defaults to 'default')"),
     },
   },
-  async ({ instruction, added_by, workspace_id }) => {
+  async ({ instruction, added_by, workspace_id }: any) => {
     const userId = added_by || DEFAULT_USER_ID;
     if (!userId) {
-      return { content: [{ type: "text", text: "Error: Missing added_by and no session context available." }] };
+      return { content: [{ type: "text" as const, text: "Error: Missing added_by and no session context available." }] };
     }
     addTeaching(instruction, userId, workspace_id || "default");
     const count = getTeachingCount(workspace_id || "default");
     return {
-      content: [{ type: "text", text: `Teaching added. Total active teachings: ${count.count}` }],
+      content: [{ type: "text" as const, text: `Teaching added. Total active teachings: ${count.count}` }],
     };
   }
 );
@@ -201,16 +194,16 @@ server.registerTool(
       workspace_id: z.string().optional().describe("Workspace ID (defaults to 'default')"),
     },
   },
-  async ({ workspace_id }) => {
+  async ({ workspace_id }: any) => {
     const teachings = getTeachings(workspace_id || "default");
     if (teachings.length === 0) {
-      return { content: [{ type: "text", text: "No active teachings." }] };
+      return { content: [{ type: "text" as const, text: "No active teachings." }] };
     }
 
     const lines = teachings.map(
       (t) => `#${t.id} — ${t.instruction} (by ${t.added_by}, ${t.created_at})`
     );
-    return { content: [{ type: "text", text: `Active teachings:\n${lines.join("\n")}` }] };
+    return { content: [{ type: "text" as const, text: `Active teachings:\n${lines.join("\n")}` }] };
   }
 );
 
@@ -222,9 +215,9 @@ server.registerTool(
       teaching_id: z.number().describe("The teaching ID to remove"),
     },
   },
-  async ({ teaching_id }) => {
+  async ({ teaching_id }: any) => {
     removeTeaching(teaching_id);
-    return { content: [{ type: "text", text: `Teaching #${teaching_id} removed.` }] };
+    return { content: [{ type: "text" as const, text: `Teaching #${teaching_id} removed.` }] };
   }
 );
 
@@ -238,19 +231,19 @@ server.registerTool(
       channel_id: z.string().optional().describe("Slack channel ID (auto-detected from session context)"),
     },
   },
-  async (params) => {
+  async (params: any) => {
     const channel_id = params.channel_id || DEFAULT_CHANNEL_ID;
     if (!channel_id) {
-      return { content: [{ type: "text", text: "Error: Missing channel_id and no session context available." }] };
+      return { content: [{ type: "text" as const, text: "Error: Missing channel_id and no session context available." }] };
     }
     const result = getChannelDefault(channel_id);
     if (!result) {
-      return { content: [{ type: "text", text: `No default CWD set for channel ${channel_id}.` }] };
+      return { content: [{ type: "text" as const, text: `No default CWD set for channel ${channel_id}.` }] };
     }
     return {
       content: [
         {
-          type: "text",
+          type: "text" as const,
           text: `Channel ${channel_id} default CWD: ${result.cwd} (set by ${result.set_by}, updated ${result.updated_at})`,
         },
       ],
@@ -268,20 +261,20 @@ server.registerTool(
       set_by: z.string().optional().describe("Slack user ID (auto-detected from session context)"),
     },
   },
-  async ({ channel_id, cwd, set_by }) => {
+  async ({ channel_id, cwd, set_by }: any) => {
     const resolvedChannel = channel_id || DEFAULT_CHANNEL_ID;
     const resolvedUser = set_by || DEFAULT_USER_ID;
     if (!resolvedChannel) {
-      return { content: [{ type: "text", text: "Error: Missing channel_id and no session context available." }] };
+      return { content: [{ type: "text" as const, text: "Error: Missing channel_id and no session context available." }] };
     }
     setChannelDefault(resolvedChannel, cwd, resolvedUser);
-    return { content: [{ type: "text", text: `Channel ${resolvedChannel} default CWD set to: ${cwd}` }] };
+    return { content: [{ type: "text" as const, text: `Channel ${resolvedChannel} default CWD set to: ${cwd}` }] };
   }
 );
 
 // ── Start ───────────────────────────────────────────────────
 
-async function main() {
+async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("claude-slacker MCP server running on stdio");

@@ -1,20 +1,24 @@
 {
   "name": "claude-slacker",
   "version": "0.1.1",
+  "type": "module",
   "description": "Bring Claude Code to your Slack workspace — per-thread AI coding sessions with full local filesystem access",
   "bin": {
-    "claude-slacker": "src/app.js"
+    "claude-slacker": "src/app.ts"
   },
   "scripts": {
-    "start": "node src/app.js"
+    "start": "bun src/app.ts"
   },
   "keywords": ["slack", "claude", "ai", "coding-assistant", "claude-code"],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@slack/bolt": "^4.1.0",
-    "better-sqlite3": "^12.6.2",
     "cron-parser": "^5.5.0",
     "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "typescript": "^5.0.0"
   }
 }

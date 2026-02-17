@@ -6,34 +6,18 @@
  * calls, and logs usage on completion.
  */
 
-const { spawn } = require("child_process");
-const { randomUUID } = require("crypto");
-const {
-  getTeachings, upsertSession, addUsageLog,
-} = require("../db");
-const {
+import { spawn } from "child_process";
+import { getTeachings, upsertSession, addUsageLog } from "../db.ts";
+import {
   buildBlocks, buildStopOnlyBlocks, buildFeedbackBlock, buildDisclaimerBlock,
-} = require("../ui/blocks");
+} from "../ui/blocks.ts";
+import { log, logErr } from "../lib/log.ts";
+import type { HandleClaudeStreamOpts } from "../types.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const UPDATE_INTERVAL_MS = 750;
 
-function ts() {
-  return new Date().toISOString();
-}
-
-function log(channel, ...args) {
-  console.log(`${ts()} [${channel || "system"}]`, ...args);
-}
-
-function logErr(channel, ...args) {
-  console.error(`${ts()} [${channel || "system"}]`, ...args);
-}
-
-/**
- * Map Claude tool names to human-readable status messages.
- */
-const TOOL_STATUS_MAP = {
+const TOOL_STATUS_MAP: Record<string, string> = {
   Read: "is reading files...",
   Write: "is writing code...",
   Edit: "is editing code...",
@@ -45,13 +29,7 @@ const TOOL_STATUS_MAP = {
   Task: "is delegating a task...",
 };
 
-/**
- * Build a human-readable title for a completed tool call.
- * @param {string} toolName
- * @param {object} toolInput - Parsed JSON input
- * @returns {string}
- */
-function toolTitle(toolName, toolInput) {
+function toolTitle(toolName: string, toolInput: any): string {
   try {
     switch (toolName) {
       case "Read":
@@ -76,23 +54,7 @@ function toolTitle(toolName, toolInput) {
   }
 }
 
-/**
- * Handle a Claude streaming session.
- *
- * @param {object} opts
- * @param {string} opts.channelId
- * @param {string} opts.threadTs
- * @param {string} opts.userText
- * @param {string} opts.userId
- * @param {object} opts.client - Slack WebClient
- * @param {string} opts.spawnCwd
- * @param {boolean} opts.isResume
- * @param {string} opts.sessionId
- * @param {Function} opts.setStatus - Assistant setStatus utility
- * @param {Map} opts.activeProcesses
- * @param {string|null} opts.cachedTeamId
- */
-async function handleClaudeStream(opts) {
+export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<void> {
   const {
     channelId, threadTs, userText, userId, client,
     spawnCwd, isResume, setStatus,
@@ -117,7 +79,7 @@ async function handleClaudeStream(opts) {
   await setStatus("is thinking...");
 
   // ── Create chat streamer (lazy — starts on first append) ──
-  let streamer = null;
+  let streamer: any = null;
   if (cachedTeamId) {
     try {
       streamer = client.chatStream({
@@ -128,7 +90,7 @@ async function handleClaudeStream(opts) {
         task_display_mode: "timeline",
       });
       log(channelId, `ChatStream created (lazy, task_display_mode=timeline)`);
-    } catch (err) {
+    } catch (err: any) {
       logErr(channelId, `chatStream creation failed, using fallback: ${err.message}`);
     }
   } else {
@@ -170,7 +132,7 @@ async function handleClaudeStream(opts) {
   log(channelId, `Spawning claude: cwd=${spawnCwd} resume=${isResume}`);
 
   // ── Spawn Claude process ──────────────────────────────────
-  const env = { ...process.env };
+  const env: Record<string, string | undefined> = { ...process.env };
   delete env.CLAUDECODE;
 
   // Inject ENV_* variables: ENV_ANTHROPIC_KEY=xxx → ANTHROPIC_KEY=xxx
@@ -185,8 +147,8 @@ async function handleClaudeStream(opts) {
   env.SLACK_USER_ID = userId;
   if (botUserId) env.SLACK_BOT_USER_ID = botUserId;
 
-  const proc = spawn(CLAUDE_PATH, args, { env, cwd: spawnCwd, stdio: ["pipe", "pipe", "pipe"] });
-  proc.stdin.end();
+  const proc = spawn(CLAUDE_PATH, args, { env: env as NodeJS.ProcessEnv, cwd: spawnCwd, stdio: ["pipe", "pipe", "pipe"] });
+  proc.stdin!.end();
   activeProcesses.set(threadTs, proc);
 
   let accumulatedText = "";
@@ -200,20 +162,20 @@ async function handleClaudeStream(opts) {
   let jsonBuffer = "";
   let stopped = false;
   let done = false;
-  let resultData = null;
+  let resultData: any = null;
   const startTime = Date.now();
 
   // Tool tracking for agentic visualization
-  const activeTools = new Map(); // index -> { name, inputJson, taskId }
+  const activeTools = new Map<number, { name: string; inputJson: string; taskId: string }>();
   let taskIdCounter = 0;
 
   log(channelId, `Claude process started: pid=${proc.pid}, session=${sessionId}, resume=${isResume}, streaming=${!streamFailed}`);
 
-  proc.stdout.on("data", (chunk) => {
+  proc.stdout!.on("data", (chunk: Buffer) => {
     const raw = chunk.toString();
     jsonBuffer += raw;
     const lines = jsonBuffer.split("\n");
-    jsonBuffer = lines.pop();
+    jsonBuffer = lines.pop()!;
 
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -259,7 +221,7 @@ async function handleClaudeStream(opts) {
                       status: "in_progress",
                     }],
                   })
-                ).catch((err) => {
+                ).catch((err: any) => {
                   if (!streamFailed) {
                     logErr(channelId, `Task chunk (in_progress) failed: ${err.message}`);
                   }
@@ -285,7 +247,7 @@ async function handleClaudeStream(opts) {
                     log(channelId, `Streamer activated: first append`);
                   }
                   return streamer.append({ markdown_text: deltaText });
-                }).catch((err) => {
+                }).catch((err: any) => {
                   if (!streamFailed) {
                     logErr(channelId, `Streaming failed, falling back to chat.update: ${err.message}`);
                     streamFailed = true;
@@ -307,7 +269,7 @@ async function handleClaudeStream(opts) {
                       text: accumulatedText,
                       blocks: buildBlocks(accumulatedText, threadTs, true),
                     })
-                    .catch((err) => logErr(channelId, `chat.update failed: ${err.message}`));
+                    .catch((err: any) => logErr(channelId, `chat.update failed: ${err.message}`));
                 }
               }
             } else if (evt?.delta?.type === "input_json_delta") {
@@ -326,7 +288,7 @@ async function handleClaudeStream(opts) {
             if (tool) {
               activeTools.delete(evt.index);
 
-              let parsedInput = {};
+              let parsedInput: any = {};
               try { parsedInput = JSON.parse(tool.inputJson); } catch {}
               const title = toolTitle(tool.name, parsedInput);
               log(channelId, `Tool complete: ${tool.name} -> "${title}"`);
@@ -342,7 +304,7 @@ async function handleClaudeStream(opts) {
                       status: "complete",
                     }],
                   })
-                ).catch((err) => {
+                ).catch((err: any) => {
                   if (!streamFailed) {
                     logErr(channelId, `Task chunk (complete) failed: ${err.message}`);
                   }
@@ -376,13 +338,13 @@ async function handleClaudeStream(opts) {
         } else {
           log(channelId, `stream: unknown type=${data.type}`);
         }
-      } catch (err) {
+      } catch (err: any) {
         logErr(channelId, `Failed to parse stream line: ${err.message} — raw: ${line.substring(0, 200)}`);
       }
     }
   });
 
-  proc.stderr.on("data", (chunk) => {
+  proc.stderr!.on("data", (chunk: Buffer) => {
     logErr(channelId, `claude stderr: ${chunk.toString().trim()}`);
   });
 
@@ -391,7 +353,7 @@ async function handleClaudeStream(opts) {
     activeProcesses.delete(threadTs);
   });
 
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     proc.on("close", async (code, signal) => {
       done = true;
       activeProcesses.delete(threadTs);
@@ -414,7 +376,7 @@ async function handleClaudeStream(opts) {
             resultData.num_turns || 0,
           );
           log(channelId, `Usage logged: cost=$${(resultData.total_cost_usd || 0).toFixed(4)} turns=${resultData.num_turns}`);
-        } catch (err) {
+        } catch (err: any) {
           logErr(channelId, `Failed to log usage: ${err.message}`);
         }
       }
@@ -430,18 +392,18 @@ async function handleClaudeStream(opts) {
         }
 
         // Stop the stream and capture its message ts
-        let streamMsgTs;
+        let streamMsgTs: string | undefined;
         try {
           const stopResponse = await streamer.stop();
           streamMsgTs = stopResponse.ts;
           log(channelId, `Stream stopped: streamMsgTs=${streamMsgTs}`);
-        } catch (err) {
+        } catch (err: any) {
           logErr(channelId, `streamer.stop failed: ${err.message}`);
         }
 
         // Delete the stream message and the stop-button carrier
         if (streamMsgTs) {
-          await client.chat.delete({ channel: channelId, ts: streamMsgTs }).catch((err) => {
+          await client.chat.delete({ channel: channelId, ts: streamMsgTs }).catch((err: any) => {
             logErr(channelId, `Failed to delete stream message: ${err.message}`);
           });
         }
@@ -456,7 +418,7 @@ async function handleClaudeStream(opts) {
           thread_ts: threadTs,
           text: finalText,
           blocks: [...buildBlocks(finalText, threadTs, false), ...finalizationBlocks],
-        }).catch((err) => logErr(channelId, `Final postMessage failed: ${err.message}`));
+        }).catch((err: any) => logErr(channelId, `Final postMessage failed: ${err.message}`));
 
         log(channelId, `Stream replaced with durable message (${finalText.length} chars)`);
       } else if (!streamFailed && !streamerActive) {
@@ -469,10 +431,10 @@ async function handleClaudeStream(opts) {
           ts: stopMsgTs,
           text,
           blocks: [...buildBlocks(text, threadTs, false), ...finalizationBlocks],
-        }).catch((err) => logErr(channelId, `Final update failed: ${err.message}`));
+        }).catch((err: any) => logErr(channelId, `Final update failed: ${err.message}`));
       } else {
         // Fallback: chat.update mode
-        let finalText;
+        let finalText: string;
         if (stopped) {
           finalText = accumulatedText
             ? accumulatedText + "\n\n_Stopped by user._"
@@ -491,17 +453,14 @@ async function handleClaudeStream(opts) {
             text: finalText,
             blocks: [...buildBlocks(finalText, threadTs, false), ...finalizationBlocks],
           })
-          .catch((err) => logErr(channelId, `Final chat.update failed: ${err.message}`));
+          .catch((err: any) => logErr(channelId, `Final chat.update failed: ${err.message}`));
       }
 
       // Clear Assistant status indicator
       await setStatus("").catch(() => {});
-
 
       log(channelId, `Done processing message from user=${userId}`);
       resolve();
     });
   });
 }
-
-module.exports = { handleClaudeStream };

@@ -1,8 +1,12 @@
-const Database = require("better-sqlite3");
-const path = require("path");
+import { Database } from "bun:sqlite";
+import path from "path";
+import type {
+  SessionRow, CwdHistoryRow, ChannelDefaultRow, TeachingRow,
+  ReminderRow, UsageLogRow, WorktreeRow, TeachingCountRow,
+} from "./types.ts";
 
-const db = new Database(path.join(__dirname, "..", "sessions.db"));
-db.pragma("journal_mode = WAL");
+const db = new Database(path.join(import.meta.dir, "..", "sessions.db"));
+db.exec("PRAGMA journal_mode = WAL");
 
 // ── Core tables ─────────────────────────────────────────────
 
@@ -174,11 +178,10 @@ db.exec(`
   )
 `);
 
-// ── Prepared statements: sessions ───────────────────────────
+// ── Prepared statements ─────────────────────────────────────
 
-const getSession = db.prepare("SELECT * FROM sessions WHERE channel_id = ?");
-
-const upsertSession = db.prepare(`
+const _getSession = db.prepare("SELECT * FROM sessions WHERE channel_id = ?");
+const _upsertSession = db.prepare(`
   INSERT INTO sessions (channel_id, session_id, persisted)
   VALUES (?, ?, 0)
   ON CONFLICT(channel_id) DO UPDATE SET
@@ -186,36 +189,26 @@ const upsertSession = db.prepare(`
     persisted = 0,
     updated_at = datetime('now')
 `);
-
-const markPersisted = db.prepare(
+const _markPersisted = db.prepare(
   "UPDATE sessions SET persisted = 1, updated_at = datetime('now') WHERE channel_id = ?"
 );
-
-const deleteSession = db.prepare("DELETE FROM sessions WHERE channel_id = ?");
-
-const setCwd = db.prepare(
+const _deleteSession = db.prepare("DELETE FROM sessions WHERE channel_id = ?");
+const _setCwd = db.prepare(
   "UPDATE sessions SET cwd = ?, updated_at = datetime('now') WHERE channel_id = ?"
 );
-
-const getCwdHistory = db.prepare(
+const _getCwdHistory = db.prepare(
   "SELECT path, last_used FROM cwd_history ORDER BY last_used DESC"
 );
-
-const addCwdHistory = db.prepare(`
+const _addCwdHistory = db.prepare(`
   INSERT INTO cwd_history (path, last_used) VALUES (?, datetime('now'))
   ON CONFLICT(path) DO UPDATE SET last_used = datetime('now')
 `);
-
-const getAllActiveSessions = db.prepare(
+const _getAllActiveSessions = db.prepare(
   "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 20"
 );
-
-// ── Prepared statements: channel_defaults ───────────────────
-
 const _getChannelDefault = db.prepare(
   "SELECT * FROM channel_defaults WHERE channel_id = ?"
 );
-
 const _setChannelDefault = db.prepare(`
   INSERT INTO channel_defaults (channel_id, cwd, set_by)
   VALUES (?, ?, ?)
@@ -224,62 +217,42 @@ const _setChannelDefault = db.prepare(`
     set_by = excluded.set_by,
     updated_at = datetime('now')
 `);
-
-// ── Prepared statements: reminders ───────────────────────────
-
 const _addReminder = db.prepare(`
   INSERT INTO reminders (channel_id, user_id, bot_id, content, original_input, cron_expression, one_time, next_trigger_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `);
-
 const _getDueReminders = db.prepare(
   "SELECT * FROM reminders WHERE active = 1 AND next_trigger_at <= datetime('now')"
 );
-
 const _updateNextTrigger = db.prepare(
   "UPDATE reminders SET next_trigger_at = ? WHERE id = ?"
 );
-
 const _deactivateReminder = db.prepare(
   "UPDATE reminders SET active = 0 WHERE id = ?"
 );
-
 const _getActiveReminders = db.prepare(
   "SELECT * FROM reminders WHERE active = 1 AND user_id = ? ORDER BY next_trigger_at"
 );
-
-// ── Prepared statements: team_knowledge ─────────────────────
-
 const _addTeaching = db.prepare(`
   INSERT INTO team_knowledge (instruction, added_by, workspace_id)
   VALUES (?, ?, ?)
 `);
-
 const _getTeachings = db.prepare(
   "SELECT id, instruction, added_by, created_at FROM team_knowledge WHERE workspace_id = ? AND active = 1 ORDER BY id"
 );
-
 const _removeTeaching = db.prepare(
   "UPDATE team_knowledge SET active = 0 WHERE id = ?"
 );
-
 const _getTeachingCount = db.prepare(
   "SELECT COUNT(*) as count FROM team_knowledge WHERE workspace_id = ? AND active = 1"
 );
-
-// ── Prepared statements: usage_logs ─────────────────────────
-
 const _addUsageLog = db.prepare(`
   INSERT INTO usage_logs (session_key, user_id, model, input_tokens, output_tokens, total_cost_usd, duration_ms, num_turns)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `);
-
 const _getRecentUsage = db.prepare(
   "SELECT * FROM usage_logs ORDER BY created_at DESC LIMIT ?"
 );
-
-// ── Prepared statements: worktrees ──────────────────────────
-
 const _upsertWorktree = db.prepare(`
   INSERT INTO worktrees (session_key, repo_path, worktree_path, branch_name)
   VALUES (?, ?, ?, ?)
@@ -290,29 +263,21 @@ const _upsertWorktree = db.prepare(`
     last_active_at = datetime('now'),
     cleaned_up = 0
 `);
-
 const _getWorktree = db.prepare(
   "SELECT * FROM worktrees WHERE session_key = ?"
 );
-
 const _touchWorktree = db.prepare(
   "UPDATE worktrees SET last_active_at = datetime('now') WHERE session_key = ?"
 );
-
 const _markWorktreeCleaned = db.prepare(
   "UPDATE worktrees SET cleaned_up = 1 WHERE session_key = ?"
 );
-
 const _getStaleWorktrees = db.prepare(
   "SELECT * FROM worktrees WHERE cleaned_up = 0 AND last_active_at < datetime('now', '-' || ? || ' minutes')"
 );
-
 const _getActiveWorktrees = db.prepare(
   "SELECT * FROM worktrees WHERE cleaned_up = 0"
 );
-
-// ── Prepared statements: feedback ────────────────────────────
-
 const _addFeedback = db.prepare(`
   INSERT INTO feedback (session_key, user_id, sentiment, message_ts)
   VALUES (?, ?, ?, ?)
@@ -320,52 +285,109 @@ const _addFeedback = db.prepare(`
 
 // ── Exports ─────────────────────────────────────────────────
 
-module.exports = {
-  // sessions
-  getSession: (channelId) => getSession.get(channelId),
-  upsertSession: (channelId, sessionId) => upsertSession.run(channelId, sessionId),
-  markPersisted: (channelId) => markPersisted.run(channelId),
-  deleteSession: (channelId) => deleteSession.run(channelId),
-  setCwd: (channelId, cwd) => setCwd.run(cwd, channelId),
-  getCwdHistory: () => getCwdHistory.all(),
-  addCwdHistory: (p) => addCwdHistory.run(p),
-  getAllActiveSessions: () => getAllActiveSessions.all(),
+// sessions
+export function getSession(channelId: string): SessionRow | null {
+  return _getSession.get(channelId) as SessionRow | null;
+}
+export function upsertSession(channelId: string, sessionId: string): void {
+  _upsertSession.run(channelId, sessionId);
+}
+export function markPersisted(channelId: string): void {
+  _markPersisted.run(channelId);
+}
+export function deleteSession(channelId: string): void {
+  _deleteSession.run(channelId);
+}
+export function setCwd(channelId: string, cwd: string): void {
+  _setCwd.run(cwd, channelId);
+}
+export function getCwdHistory(): CwdHistoryRow[] {
+  return _getCwdHistory.all() as CwdHistoryRow[];
+}
+export function addCwdHistory(p: string): void {
+  _addCwdHistory.run(p);
+}
+export function getAllActiveSessions(): SessionRow[] {
+  return _getAllActiveSessions.all() as SessionRow[];
+}
 
-  // channel_defaults
-  getChannelDefault: (channelId) => _getChannelDefault.get(channelId),
-  setChannelDefault: (channelId, cwd, setBy) => _setChannelDefault.run(channelId, cwd, setBy),
+// channel_defaults
+export function getChannelDefault(channelId: string): ChannelDefaultRow | null {
+  return _getChannelDefault.get(channelId) as ChannelDefaultRow | null;
+}
+export function setChannelDefault(channelId: string, cwd: string, setBy: string): void {
+  _setChannelDefault.run(channelId, cwd, setBy);
+}
 
-  // team_knowledge
-  addTeaching: (instruction, addedBy, workspaceId = "default") => _addTeaching.run(instruction, addedBy, workspaceId),
-  getTeachings: (workspaceId = "default") => _getTeachings.all(workspaceId),
-  removeTeaching: (id) => _removeTeaching.run(id),
-  getTeachingCount: (workspaceId = "default") => _getTeachingCount.get(workspaceId),
+// team_knowledge
+export function addTeaching(instruction: string, addedBy: string, workspaceId: string = "default"): void {
+  _addTeaching.run(instruction, addedBy, workspaceId);
+}
+export function getTeachings(workspaceId: string = "default"): TeachingRow[] {
+  return _getTeachings.all(workspaceId) as TeachingRow[];
+}
+export function removeTeaching(id: number): void {
+  _removeTeaching.run(id);
+}
+export function getTeachingCount(workspaceId: string = "default"): TeachingCountRow {
+  return _getTeachingCount.get(workspaceId) as TeachingCountRow;
+}
 
-  // usage_logs
-  addUsageLog: (sessionKey, userId, model, inputTokens, outputTokens, cost, durationMs, numTurns) =>
-    _addUsageLog.run(sessionKey, userId, model, inputTokens, outputTokens, cost, durationMs, numTurns),
-  getRecentUsage: (limit = 10) => _getRecentUsage.all(limit),
+// usage_logs
+export function addUsageLog(
+  sessionKey: string, userId: string, model: string | null,
+  inputTokens: number, outputTokens: number, cost: number,
+  durationMs: number, numTurns: number
+): void {
+  _addUsageLog.run(sessionKey, userId, model, inputTokens, outputTokens, cost, durationMs, numTurns);
+}
+export function getRecentUsage(limit: number = 10): UsageLogRow[] {
+  return _getRecentUsage.all(limit) as UsageLogRow[];
+}
 
-  // worktrees
-  upsertWorktree: (sessionKey, repoPath, worktreePath, branchName) =>
-    _upsertWorktree.run(sessionKey, repoPath, worktreePath, branchName),
-  getWorktree: (sessionKey) => _getWorktree.get(sessionKey),
-  touchWorktree: (sessionKey) => _touchWorktree.run(sessionKey),
-  markWorktreeCleaned: (sessionKey) => _markWorktreeCleaned.run(sessionKey),
-  getStaleWorktrees: (idleMinutes) => _getStaleWorktrees.all(idleMinutes),
-  getActiveWorktrees: () => _getActiveWorktrees.all(),
+// worktrees
+export function upsertWorktree(sessionKey: string, repoPath: string, worktreePath: string, branchName: string): void {
+  _upsertWorktree.run(sessionKey, repoPath, worktreePath, branchName);
+}
+export function getWorktree(sessionKey: string): WorktreeRow | null {
+  return _getWorktree.get(sessionKey) as WorktreeRow | null;
+}
+export function touchWorktree(sessionKey: string): void {
+  _touchWorktree.run(sessionKey);
+}
+export function markWorktreeCleaned(sessionKey: string): void {
+  _markWorktreeCleaned.run(sessionKey);
+}
+export function getStaleWorktrees(idleMinutes: number): WorktreeRow[] {
+  return _getStaleWorktrees.all(idleMinutes) as WorktreeRow[];
+}
+export function getActiveWorktrees(): WorktreeRow[] {
+  return _getActiveWorktrees.all() as WorktreeRow[];
+}
 
-  // feedback
-  addFeedback: (sessionKey, userId, sentiment, messageTs) =>
-    _addFeedback.run(sessionKey, userId, sentiment, messageTs),
+// feedback
+export function addFeedback(sessionKey: string, userId: string, sentiment: string, messageTs: string): void {
+  _addFeedback.run(sessionKey, userId, sentiment, messageTs);
+}
 
-  // reminders
-  addReminder: (channelId, userId, botId, content, originalInput, cronExpression, oneTime, nextTriggerAt) =>
-    _addReminder.run(channelId, userId, botId, content, originalInput, cronExpression, oneTime, nextTriggerAt),
-  getDueReminders: () => _getDueReminders.all(),
-  updateNextTrigger: (nextTriggerAt, id) => _updateNextTrigger.run(nextTriggerAt, id),
-  deactivateReminder: (id) => _deactivateReminder.run(id),
-  getActiveReminders: (userId) => _getActiveReminders.all(userId),
+// reminders
+export function addReminder(
+  channelId: string, userId: string, botId: string, content: string,
+  originalInput: string, cronExpression: string | null, oneTime: number, nextTriggerAt: string
+): void {
+  _addReminder.run(channelId, userId, botId, content, originalInput, cronExpression, oneTime, nextTriggerAt);
+}
+export function getDueReminders(): ReminderRow[] {
+  return _getDueReminders.all() as ReminderRow[];
+}
+export function updateNextTrigger(nextTriggerAt: string, id: number): void {
+  _updateNextTrigger.run(nextTriggerAt, id);
+}
+export function deactivateReminder(id: number): void {
+  _deactivateReminder.run(id);
+}
+export function getActiveReminders(userId: string): ReminderRow[] {
+  return _getActiveReminders.all(userId) as ReminderRow[];
+}
 
-  db,
-};
+export { db };

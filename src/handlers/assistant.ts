@@ -6,57 +6,44 @@
  * and delegating to the stream handler for Claude invocations.
  */
 
-const { Assistant } = require("@slack/bolt");
-const { randomUUID } = require("crypto");
-const {
+import { Assistant } from "@slack/bolt";
+import { randomUUID } from "crypto";
+import {
   getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,
   addTeaching, getTeachings, removeTeaching, getTeachingCount,
   getWorktree, touchWorktree, upsertWorktree, markWorktreeCleaned,
-} = require("../db");
-const {
+} from "../db.ts";
+import {
   detectGitRepo, createWorktree, copyEnvFiles,
-} = require("../lib/worktree");
-const { buildSuggestedPrompts } = require("../ui/blocks");
-const { handleClaudeStream } = require("./stream");
+} from "../lib/worktree.ts";
+import { buildSuggestedPrompts } from "../ui/blocks.ts";
+import { handleClaudeStream } from "./stream.ts";
+import { log, logErr } from "../lib/log.ts";
+import type { ActiveProcessMap, Ref } from "../types.ts";
 
 const ALLOWED_USERS = new Set(
   (process.env.ALLOWED_USERS || "").split(",").map((s) => s.trim()).filter(Boolean)
 );
 
-function ts() {
-  return new Date().toISOString();
-}
-
-function log(channel, ...args) {
-  console.log(`${ts()} [${channel || "system"}]`, ...args);
-}
-
-function logErr(channel, ...args) {
-  console.error(`${ts()} [${channel || "system"}]`, ...args);
-}
-
-/**
- * Create the Assistant instance.
- *
- * @param {Map} activeProcesses
- * @param {{ value: string|null }} cachedTeamIdRef
- * @returns {Assistant}
- */
-function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
+export function createAssistant(
+  activeProcesses: ActiveProcessMap,
+  cachedTeamIdRef: Ref<string | null>,
+  cachedBotUserIdRef: Ref<string | null>,
+): Assistant {
   return new Assistant({
-    threadStarted: async ({ event, setSuggestedPrompts }) => {
+    threadStarted: async ({ event, setSuggestedPrompts }: any) => {
       const threadTs = event.assistant_thread?.thread_ts;
       log(null, `Assistant threadStarted: thread=${threadTs}`);
 
       const session = threadTs ? getSession(threadTs) : null;
       try {
-        await setSuggestedPrompts(buildSuggestedPrompts(session?.cwd));
-      } catch (err) {
+        await setSuggestedPrompts(buildSuggestedPrompts(session?.cwd ?? null));
+      } catch (err: any) {
         logErr(null, `Failed to set suggested prompts: ${err.message}`);
       }
     },
 
-    userMessage: async ({ message, client, say, setStatus, setTitle, setSuggestedPrompts }) => {
+    userMessage: async ({ message, client, say, setStatus, setTitle, setSuggestedPrompts }: any) => {
       const channelId = message.channel;
       const threadTs = message.thread_ts || message.ts;
       const userText = message.text;
@@ -92,7 +79,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
             await say(`Working directory set to \`${pathArg}\``);
             // Update suggested prompts with CWD context
             await setSuggestedPrompts(buildSuggestedPrompts(pathArg));
-          } catch (err) {
+          } catch (err: any) {
             logErr(channelId, `Failed to send CWD confirmation: ${err.message}`);
           }
           return;
@@ -102,7 +89,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
         const history = getCwdHistory();
         log(channelId, `$cwd picker requested, history_count=${history.length}`);
 
-        const blocks = [
+        const blocks: any[] = [
           { type: "header", text: { type: "plain_text", text: "Set Working Directory" } },
           { type: "divider" },
         ];
@@ -155,7 +142,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
             text: "Set working directory",
           });
           log(channelId, `$cwd picker sent`);
-        } catch (err) {
+        } catch (err: any) {
           logErr(channelId, `Failed to send $cwd picker: ${err.message}`);
         }
         return;
@@ -180,7 +167,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
               ],
               text: "Team Knowledge Base help",
             });
-          } catch (err) {
+          } catch (err: any) {
             logErr(channelId, `$teach help: failed: ${err.message}`);
           }
           return;
@@ -192,7 +179,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
           if (teachings.length === 0) {
             try {
               await say("No teachings yet. Add one with `$teach <instruction>`.");
-            } catch (err) {
+            } catch (err: any) {
               logErr(channelId, `$teach list (empty): failed: ${err.message}`);
             }
             return;
@@ -210,7 +197,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
               ],
               text: `${teachings.length} teachings`,
             });
-          } catch (err) {
+          } catch (err: any) {
             logErr(channelId, `$teach list: failed: ${err.message}`);
           }
           return;
@@ -223,7 +210,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
           removeTeaching(id);
           try {
             await say(`Teaching #${id} removed.`);
-          } catch (err) {
+          } catch (err: any) {
             logErr(channelId, `$teach remove: failed: ${err.message}`);
           }
           return;
@@ -237,7 +224,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
         log(channelId, `$teach: now ${count.count} active teaching(s)`);
         try {
           await say(`Learned: _${instruction}_\n(${count.count} active teaching${count.count !== 1 ? "s" : ""})`);
-        } catch (err) {
+        } catch (err: any) {
           logErr(channelId, `$teach add: failed: ${err.message}`);
         }
         return;
@@ -246,14 +233,14 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
       // ── Guard: already processing ─────────────────────
       if (activeProcesses.has(threadTs)) {
         const existing = activeProcesses.get(threadTs);
-        log(channelId, `Rejecting — already processing (pid=${existing.pid})`);
+        log(channelId, `Rejecting — already processing (pid=${existing?.pid})`);
         await say("Still processing the previous message...");
         return;
       }
 
       // ── Session lookup ────────────────────────────────
       const session = getSession(threadTs);
-      let sessionId;
+      let sessionId: string;
       let isResume = false;
 
       if (session && session.session_id && session.session_id !== "pending") {
@@ -275,7 +262,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
         try {
           await say("No working directory set. Send `$cwd` to pick one, or `$cwd /path/to/dir` to set directly.");
           await setSuggestedPrompts(buildSuggestedPrompts(null));
-        } catch (err) {
+        } catch (err: any) {
           logErr(channelId, `CWD gating: failed: ${err.message}`);
         }
         return;
@@ -287,7 +274,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
         try {
           await setTitle(titleText);
           log(channelId, `Thread title set: "${titleText}"`);
-        } catch (err) {
+        } catch (err: any) {
           logErr(channelId, `Failed to set title: ${err.message}`);
         }
       }
@@ -306,12 +293,12 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
         log(channelId, `Git detection: cwd=${currentSession.cwd} isGit=${gitInfo.isGit} repoRoot=${gitInfo.repoRoot}`);
         if (gitInfo.isGit) {
           try {
-            const { worktreePath, branchName } = createWorktree(gitInfo.repoRoot, threadTs);
+            const { worktreePath, branchName } = createWorktree(gitInfo.repoRoot!, threadTs);
             copyEnvFiles(currentSession.cwd, worktreePath);
-            upsertWorktree(threadTs, gitInfo.repoRoot, worktreePath, branchName);
+            upsertWorktree(threadTs, gitInfo.repoRoot!, worktreePath, branchName);
             spawnCwd = worktreePath;
             log(channelId, `Created worktree: ${worktreePath} branch=${branchName}`);
-          } catch (err) {
+          } catch (err: any) {
             logErr(channelId, `Worktree creation failed, using raw CWD: ${err.message}`);
           }
         } else {
@@ -326,7 +313,7 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
         userText,
         userId: message.user,
         client,
-        spawnCwd,
+        spawnCwd: spawnCwd!,
         isResume,
         sessionId,
         setStatus,
@@ -337,5 +324,3 @@ function createAssistant(activeProcesses, cachedTeamIdRef, cachedBotUserIdRef) {
     },
   });
 }
-
-module.exports = { createAssistant };

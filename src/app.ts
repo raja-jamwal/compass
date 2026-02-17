@@ -1,19 +1,21 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
-const path = require("path");
-const fs = require("fs");
+import path from "path";
+import fs from "fs";
+import os from "os";
+import dotenv from "dotenv";
 
 // --- Environment loading (precedence: real env > --env-file > ~/.claude-slacker/.env > local .env) ---
 // Snapshot real env vars so we can restore them after file-based loading
 const realEnv = { ...process.env };
 
 // 1. Local .env (lowest priority)
-require("dotenv").config();
+dotenv.config();
 
 // 2. Home-dir config (overrides local .env)
-const homeEnv = path.join(require("os").homedir(), ".claude-slacker", ".env");
+const homeEnv = path.join(os.homedir(), ".claude-slacker", ".env");
 if (fs.existsSync(homeEnv)) {
-  require("dotenv").config({ path: homeEnv, override: true });
+  dotenv.config({ path: homeEnv, override: true });
 }
 
 // 3. --env-file flag (overrides home-dir)
@@ -24,41 +26,31 @@ if (envFileIdx !== -1 && process.argv[envFileIdx + 1]) {
     console.error(`Error: env file not found: ${custom}`);
     process.exit(1);
   }
-  require("dotenv").config({ path: custom, override: true });
+  dotenv.config({ path: custom, override: true });
 }
 
 // 4. Restore real env vars (always highest priority)
 Object.assign(process.env, realEnv);
 // -----------------------------------------------------------------------------------------
 
-const { App } = require("@slack/bolt");
-const { execFileSync } = require("child_process");
-const {
+import { App } from "@slack/bolt";
+import { execFileSync } from "child_process";
+import {
   getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,
   getChannelDefault, setChannelDefault,
   addTeaching, getTeachings, removeTeaching,
   getStaleWorktrees, getActiveWorktrees, markWorktreeCleaned,
   addFeedback, getWorktree, touchWorktree, upsertWorktree,
   getDueReminders, updateNextTrigger, deactivateReminder,
-} = require("./db");
-const { randomUUID } = require("crypto");
-const { CronExpressionParser } = require("cron-parser");
-const { removeWorktree, hasUncommittedChanges, detectGitRepo, createWorktree, copyEnvFiles } = require("./lib/worktree");
-const { buildHomeBlocks } = require("./ui/blocks");
-const { createAssistant } = require("./handlers/assistant");
-const { handleClaudeStream } = require("./handlers/stream");
-
-function ts() {
-  return new Date().toISOString();
-}
-
-function log(channel, ...args) {
-  console.log(`${ts()} [${channel || "system"}]`, ...args);
-}
-
-function logErr(channel, ...args) {
-  console.error(`${ts()} [${channel || "system"}]`, ...args);
-}
+} from "./db.ts";
+import { randomUUID } from "crypto";
+import { CronExpressionParser } from "cron-parser";
+import { removeWorktree, hasUncommittedChanges, detectGitRepo, createWorktree, copyEnvFiles } from "./lib/worktree.ts";
+import { buildHomeBlocks } from "./ui/blocks.ts";
+import { createAssistant } from "./handlers/assistant.ts";
+import { handleClaudeStream } from "./handlers/stream.ts";
+import { log, logErr, toSqliteDatetime } from "./lib/log.ts";
+import type { ActiveProcessMap, Ref } from "./types.ts";
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -67,11 +59,11 @@ const app = new App({
 });
 
 // Track active claude processes per thread
-const activeProcesses = new Map();
+const activeProcesses: ActiveProcessMap = new Map();
 
 // Shared refs so assistant.js can read the cached team_id
-const cachedTeamIdRef = { value: null };
-const cachedBotUserIdRef = { value: null };
+const cachedTeamIdRef: Ref<string | null> = { value: null };
+const cachedBotUserIdRef: Ref<string | null> = { value: null };
 
 // ── Register Assistant ──────────────────────────────────────
 
@@ -80,7 +72,7 @@ app.assistant(assistant);
 
 // ── Feedback action handler ─────────────────────────────────
 
-app.action("response_feedback", async ({ action, ack, body }) => {
+app.action("response_feedback", async ({ action, ack, body }: any) => {
   await ack();
   const [sentiment, sessionKey] = action.value.split(":");
   const userId = body.user?.id;
@@ -88,14 +80,14 @@ app.action("response_feedback", async ({ action, ack, body }) => {
   log(null, `Feedback: sentiment=${sentiment} session=${sessionKey} user=${userId} ts=${messageTs}`);
   try {
     addFeedback(sessionKey, userId, sentiment, messageTs);
-  } catch (err) {
+  } catch (err: any) {
     logErr(null, `Failed to log feedback: ${err.message}`);
   }
 });
 
 // ── Stop button ─────────────────────────────────────────────
 
-app.action("stop_claude", async ({ action, ack, body }) => {
+app.action("stop_claude", async ({ action, ack, body }: any) => {
   await ack();
   const threadKey = action.value;
   log(threadKey, `Stop button pressed by user=${body.user?.id}`);
@@ -111,7 +103,7 @@ app.action("stop_claude", async ({ action, ack, body }) => {
 
 // ── $cwd action handlers ────────────────────────────────────
 
-app.action("cwd_pick", async ({ action, ack, client, body }) => {
+app.action("cwd_pick", async ({ action, ack, client, body }: any) => {
   await ack();
   const channelId = body.channel?.id || body.container?.channel_id;
   const threadTs = body.message?.thread_ts || body.message?.ts;
@@ -144,7 +136,7 @@ app.action("cwd_pick", async ({ action, ack, client, body }) => {
   });
 });
 
-app.action("cwd_add_new", async ({ action, ack, client, body }) => {
+app.action("cwd_add_new", async ({ action, ack, client, body }: any) => {
   await ack();
   const meta = JSON.parse(action.value);
   log(meta.channelId, `cwd_add_new: opening modal user=${body.user?.id} thread=${meta.threadTs}`);
@@ -176,12 +168,12 @@ app.action("cwd_add_new", async ({ action, ack, client, body }) => {
 
 // ── /cwd slash command ──────────────────────────────────────
 
-app.command("/cwd", async ({ command, ack, client }) => {
+app.command("/cwd", async ({ command, ack, client }: any) => {
   await ack();
   const history = getCwdHistory();
   log(command.channel_id, `/cwd command invoked by user=${command.user_id}, history_count=${history.length}`);
 
-  const blocks = [];
+  const blocks: any[] = [];
 
   if (history.length > 0) {
     blocks.push({
@@ -229,15 +221,9 @@ app.command("/cwd", async ({ command, ack, client }) => {
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 
-/** Convert a Date or ISO string to SQLite datetime format (YYYY-MM-DD HH:MM:SS UTC) */
-function toSqliteDatetime(d) {
-  const date = typeof d === "string" ? new Date(d) : d;
-  return date.toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
-}
-
 // ── Modal submissions ───────────────────────────────────────
 
-app.view("cwd_modal", async ({ view, ack, client }) => {
+app.view("cwd_modal", async ({ view, ack, client }: any) => {
   const meta = JSON.parse(view.private_metadata);
   const { channelId, threadTs, isTopLevel } = meta;
   const values = view.state.values;
@@ -290,7 +276,7 @@ app.view("cwd_modal", async ({ view, ack, client }) => {
   });
 });
 
-app.view("teaching_modal", async ({ view, ack, client, body }) => {
+app.view("teaching_modal", async ({ view, ack, client, body }: any) => {
   log(null, `teaching_modal: submission by user=${body.user?.id}`);
   const instruction = view.state.values.teaching_input_block.teaching_input.value;
   if (!instruction?.trim()) {
@@ -310,14 +296,14 @@ app.view("teaching_modal", async ({ view, ack, client, body }) => {
       user_id: body.user.id,
       view: { type: "home", blocks: buildHomeBlocks(activeProcesses) },
     });
-  } catch (err) {
+  } catch (err: any) {
     logErr(null, `Failed to refresh Home after teaching add: ${err.message}`);
   }
 });
 
 // ── App Home dashboard ──────────────────────────────────────
 
-app.event("app_home_opened", async ({ event, client }) => {
+app.event("app_home_opened", async ({ event, client }: any) => {
   if (event.tab !== "home") return;
   log(null, `App Home opened by user=${event.user}`);
 
@@ -326,12 +312,12 @@ app.event("app_home_opened", async ({ event, client }) => {
       user_id: event.user,
       view: { type: "home", blocks: buildHomeBlocks(activeProcesses) },
     });
-  } catch (err) {
+  } catch (err: any) {
     logErr(null, `Failed to publish App Home: ${err.message}`);
   }
 });
 
-app.action("home_view_teachings", async ({ ack, client, body }) => {
+app.action("home_view_teachings", async ({ ack, client, body }: any) => {
   await ack();
   log(null, `Home: "View Teachings" clicked by user=${body.user?.id}`);
   const teachings = getTeachings("default");
@@ -354,7 +340,7 @@ app.action("home_view_teachings", async ({ ack, client, body }) => {
   });
 });
 
-app.action("home_add_teaching", async ({ ack, client, body }) => {
+app.action("home_add_teaching", async ({ ack, client, body }: any) => {
   await ack();
   log(null, `Home: "Add Teaching" clicked by user=${body.user?.id}`);
   await client.views.open({
@@ -388,7 +374,7 @@ const ALLOWED_USERS = new Set(
   (process.env.ALLOWED_USERS || "").split(",").map((s) => s.trim()).filter(Boolean)
 );
 
-app.event("app_mention", async ({ event, client }) => {
+app.event("app_mention", async ({ event, client }: any) => {
   const channelId = event.channel;
   const threadTs = event.thread_ts || event.ts;
   const userId = event.user;
@@ -426,7 +412,7 @@ app.event("app_mention", async ({ event, client }) => {
         : `Working directory set to \`${pathArg}\``;
       try {
         await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: confirmText });
-      } catch (err) {
+      } catch (err: any) {
         logErr(channelId, `$cwd set reply failed: ${err.message}`);
       }
     } else {
@@ -434,7 +420,7 @@ app.event("app_mention", async ({ event, client }) => {
       const history = getCwdHistory();
       log(channelId, `$cwd picker requested, history_count=${history.length}`);
 
-      const pickerBlocks = [
+      const pickerBlocks: any[] = [
         { type: "header", text: { type: "plain_text", text: "Set Working Directory" } },
         { type: "divider" },
       ];
@@ -487,7 +473,7 @@ app.event("app_mention", async ({ event, client }) => {
           text: "Set working directory",
         });
         log(channelId, `$cwd picker sent`);
-      } catch (err) {
+      } catch (err: any) {
         logErr(channelId, `$cwd picker reply failed: ${err.message}`);
       }
     }
@@ -520,7 +506,7 @@ app.event("app_mention", async ({ event, client }) => {
       const instruction = teachArg.replace(/^["']|["']$/g, "");
       addTeaching(instruction, userId);
       await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: `Learned: _${instruction}_` });
-    } catch (err) {
+    } catch (err: any) {
       logErr(channelId, `$teach reply failed: ${err.message}`);
     }
     return;
@@ -529,17 +515,25 @@ app.event("app_mention", async ({ event, client }) => {
   await processMessage({ channelId, threadTs, userText, userId, client });
 });
 
+interface ProcessMessageOpts {
+  channelId: string;
+  threadTs: string;
+  userText: string;
+  userId: string;
+  client: any;
+}
+
 /**
  * Core message processing: session lookup, CWD gate, worktree setup, Claude spawn.
  * Called from app_mention handler and reminder polling loop.
  */
-async function processMessage({ channelId, threadTs, userText, userId, client }) {
+async function processMessage({ channelId, threadTs, userText, userId, client }: ProcessMessageOpts): Promise<void> {
   // ── Guard: already processing ─────────────────────────────
   if (activeProcesses.has(threadTs)) {
     log(channelId, `Rejecting — already processing`);
     try {
       await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: "Still processing the previous message..." });
-    } catch (err) {
+    } catch (err: any) {
       logErr(channelId, `Busy reply failed: ${err.message}`);
     }
     return;
@@ -552,7 +546,7 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
 
   // ── Session lookup ────────────────────────────────────────
   const session = getSession(threadTs);
-  let sessionId;
+  let sessionId: string;
   let isResume = false;
   if (session && session.session_id && session.session_id !== "pending") {
     sessionId = session.session_id;
@@ -583,7 +577,7 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
     log(channelId, `No CWD set, blocking`);
     try {
       await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: "No working directory set. Send `$cwd /path/to/dir` to set one." });
-    } catch (err) {
+    } catch (err: any) {
       logErr(channelId, `CWD gate reply failed: ${err.message}`);
     }
     return;
@@ -601,12 +595,12 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
     log(channelId, `Git detection: cwd=${effectiveCwd} isGit=${gitInfo.isGit}`);
     if (gitInfo.isGit) {
       try {
-        const { worktreePath, branchName } = createWorktree(gitInfo.repoRoot, threadTs);
+        const { worktreePath, branchName } = createWorktree(gitInfo.repoRoot!, threadTs);
         copyEnvFiles(effectiveCwd, worktreePath);
-        upsertWorktree(threadTs, gitInfo.repoRoot, worktreePath, branchName);
+        upsertWorktree(threadTs, gitInfo.repoRoot!, worktreePath, branchName);
         spawnCwd = worktreePath;
         log(channelId, `Created worktree: ${worktreePath}`);
-      } catch (err) {
+      } catch (err: any) {
         logErr(channelId, `Worktree creation failed: ${err.message}`);
       }
     }
@@ -646,8 +640,8 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
 
   // Register MCP server (idempotent — overwrites if already exists)
   try {
-    const mcpServerPath = require("path").join(__dirname, "mcp", "server.js");
-    const mcpEnv = { ...process.env };
+    const mcpServerPath = path.join(import.meta.dir, "mcp", "server.ts");
+    const mcpEnv: Record<string, string | undefined> = { ...process.env };
     delete mcpEnv.CLAUDECODE; // avoid nested-session check
     execFileSync(claudePath, [
       "mcp", "add",
@@ -655,10 +649,10 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
       "--scope", "user",
       "claude-slacker",
       "--",
-      "node", mcpServerPath,
-    ], { encoding: "utf-8", timeout: 10000, env: mcpEnv, stdio: ["pipe", "pipe", "pipe"] });
+      "bun", mcpServerPath,
+    ], { encoding: "utf-8", timeout: 10000, env: mcpEnv as NodeJS.ProcessEnv, stdio: ["pipe", "pipe", "pipe"] });
     log(null, `MCP server registered: claude-slacker -> ${mcpServerPath}`);
-  } catch (err) {
+  } catch (err: any) {
     logErr(null, `Failed to register MCP server (non-fatal): ${err.message}`);
   }
 
@@ -667,10 +661,10 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
   // Cache team ID and bot user ID
   try {
     const authResult = await app.client.auth.test();
-    cachedTeamIdRef.value = authResult.team_id;
-    cachedBotUserIdRef.value = authResult.user_id;
+    cachedTeamIdRef.value = authResult.team_id ?? null;
+    cachedBotUserIdRef.value = authResult.user_id ?? null;
     log(null, `Cached team_id: ${cachedTeamIdRef.value}, bot_user_id: ${cachedBotUserIdRef.value}`);
-  } catch (err) {
+  } catch (err: any) {
     logErr(null, `Failed to cache team_id/bot_user_id: ${err.message}`);
   }
 
@@ -702,17 +696,17 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
           removeWorktree(wt.repo_path, wt.worktree_path, wt.branch_name);
           markWorktreeCleaned(wt.session_key);
           log(null, `Cleaned stale worktree: ${wt.worktree_path}`);
-        } catch (err) {
+        } catch (err: any) {
           logErr(null, `Failed to clean worktree ${wt.worktree_path}: ${err.message}`);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       logErr(null, `Worktree cleanup error: ${err.message}`);
     }
   }, 60 * 60 * 1000);
 
   // Reminder polling: fire due reminders
-  async function pollReminders() {
+  async function pollReminders(): Promise<void> {
     try {
       const due = getDueReminders();
       if (due.length === 0) return;
@@ -728,7 +722,7 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
           log(null, `Reminder #${reminder.id} fired in channel=${reminder.channel_id}: "${reminder.content}"`);
 
           // Directly process the message (self-mentions don't trigger app_mention)
-          const threadTs = posted.ts;
+          const threadTs = posted.ts!;
           await processMessage({
             channelId: reminder.channel_id,
             threadTs,
@@ -742,20 +736,20 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
             log(null, `Reminder #${reminder.id} deactivated (one-time)`);
           } else {
             try {
-              const interval = CronExpressionParser.parse(reminder.cron_expression);
+              const interval = CronExpressionParser.parse(reminder.cron_expression!);
               const nextTrigger = toSqliteDatetime(interval.next().toDate());
               updateNextTrigger(nextTrigger, reminder.id);
               log(null, `Reminder #${reminder.id} next trigger: ${nextTrigger}`);
-            } catch (err) {
+            } catch (err: any) {
               logErr(null, `Failed to compute next trigger for reminder #${reminder.id}: ${err.message}`);
               deactivateReminder(reminder.id);
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           logErr(null, `Failed to fire reminder #${reminder.id}: ${err.message}`);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       logErr(null, `Reminder poll error: ${err.message}`);
     }
   }
