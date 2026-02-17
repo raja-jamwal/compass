@@ -4,7 +4,7 @@
 
 const {
   getAllActiveSessions, getTeachings, getActiveWorktrees, getRecentUsage,
-} = require("./db");
+} = require("../db");
 
 /**
  * Build message blocks with text and an optional Stop button.

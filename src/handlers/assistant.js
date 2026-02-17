@@ -12,12 +12,12 @@ const {
   getSession, upsertSession, setCwd, getCwdHistory, addCwdHistory,
   addTeaching, getTeachings, removeTeaching, getTeachingCount,
   getWorktree, touchWorktree, upsertWorktree,
-} = require("./db");
+} = require("../db");
 const {
   detectGitRepo, createWorktree, copyEnvFiles,
-} = require("./worktree");
-const { buildSuggestedPrompts } = require("./blocks");
-const { handleClaudeStream } = require("./stream-handler");
+} = require("../lib/worktree");
+const { buildSuggestedPrompts } = require("../ui/blocks");
+const { handleClaudeStream } = require("./stream");
 
 const ALLOWED_USERS = new Set(
   (process.env.ALLOWED_USERS || "").split(",").map((s) => s.trim()).filter(Boolean)

@@ -29,7 +29,7 @@ const {
   getTeachingCount,
   getChannelDefault,
   setChannelDefault,
-} = require("./db");
+} = require("../db");
 
 // ── Helpers ─────────────────────────────────────────────────
 

@@ -43,10 +43,10 @@ const {
 } = require("./db");
 const { randomUUID } = require("crypto");
 const { CronExpressionParser } = require("cron-parser");
-const { removeWorktree, hasUncommittedChanges, detectGitRepo, createWorktree, copyEnvFiles } = require("./worktree");
-const { buildHomeBlocks } = require("./blocks");
-const { createAssistant } = require("./assistant");
-const { handleClaudeStream } = require("./stream-handler");
+const { removeWorktree, hasUncommittedChanges, detectGitRepo, createWorktree, copyEnvFiles } = require("./lib/worktree");
+const { buildHomeBlocks } = require("./ui/blocks");
+const { createAssistant } = require("./handlers/assistant");
+const { handleClaudeStream } = require("./handlers/stream");
 
 function ts() {
   return new Date().toISOString();
@@ -634,7 +634,7 @@ async function processMessage({ channelId, threadTs, userText, userId, client })
 
   // Register MCP server (idempotent — overwrites if already exists)
   try {
-    const mcpServerPath = require("path").join(__dirname, "mcp-server.js");
+    const mcpServerPath = require("path").join(__dirname, "mcp", "server.js");
     const mcpEnv = { ...process.env };
     delete mcpEnv.CLAUDECODE; // avoid nested-session check
     execFileSync(claudePath, [

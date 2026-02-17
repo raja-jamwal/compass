@@ -10,10 +10,10 @@ const { spawn } = require("child_process");
 const { randomUUID } = require("crypto");
 const {
   getTeachings, upsertSession, addUsageLog,
-} = require("./db");
+} = require("../db");
 const {
   buildBlocks, buildStopOnlyBlocks, buildFeedbackBlock, buildDisclaimerBlock,
-} = require("./blocks");
+} = require("../ui/blocks");
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const UPDATE_INTERVAL_MS = 750;
