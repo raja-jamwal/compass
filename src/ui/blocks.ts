@@ -69,6 +69,10 @@ export function buildSuggestedPrompts(cwd: string | null): { prompts: any[]; tit
   return {
     prompts: [
       {
+        title: "Set working directory",
+        message: "$cwd",
+      },
+      {
         title: "Explain this codebase",
         message: "Give me a high-level overview of this project's architecture, key files, and how the code is organized.",
       },
@@ -79,10 +83,6 @@ export function buildSuggestedPrompts(cwd: string | null): { prompts: any[]; tit
       {
         title: "Write tests",
         message: "Identify code lacking test coverage and write comprehensive tests for the most critical paths.",
-      },
-      {
-        title: "Refactor code",
-        message: "Suggest refactoring opportunities to improve readability, maintainability, and performance.",
       },
     ],
     title: cwd ? `Working in ${cwd}` : "What would you like to do?",
