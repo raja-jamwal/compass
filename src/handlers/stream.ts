@@ -62,21 +62,29 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
   } = opts;
   let { sessionId } = opts;
 
-  // ── Post stop-button carrier (stop button only, status handles "thinking") ─
-  log(channelId, `Posting stop-button carrier in thread=${threadTs}`);
+  // ── Status + lazy stop-button carrier ───────────────────────
   await setStatus("is thinking...");
 
-  const stopMsg = await client.chat.postMessage({
-    channel: channelId,
-    thread_ts: threadTs,
-    text: " ",
-    blocks: buildStopOnlyBlocks(threadTs),
-  });
-  const stopMsgTs = stopMsg.ts;
-  log(channelId, `Stop-button carrier posted: ts=${stopMsgTs}`);
-
-  // Re-set status after posting (postMessage clears status)
-  await setStatus("is thinking...");
+  // Stop button is posted lazily: after first stream content (so it appears
+  // below the streaming text) or before first fallback chat.update.
+  let stopMsgTs: string | undefined;
+  let stopBtnPromise: Promise<void>;
+  function ensureStopButton(): Promise<void> {
+    if (!stopBtnPromise) {
+      stopBtnPromise = client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: " ",
+        blocks: buildStopOnlyBlocks(threadTs),
+      }).then((res: any) => {
+        stopMsgTs = res.ts;
+        log(channelId, `Stop-button carrier posted: ts=${stopMsgTs}`);
+      }).catch((err: any) => {
+        logErr(channelId, `Failed to post stop button: ${err.message}`);
+      });
+    }
+    return stopBtnPromise;
+  }
 
   // ── Create chat streamer (lazy — starts on first append) ──
   let streamer: any = null;
@@ -241,12 +249,14 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
 
               // Streaming path: use chatStream
               if (!streamFailed) {
-                appendChain = appendChain.then(() => {
+                appendChain = appendChain.then(async () => {
                   if (!streamerActive) {
                     streamerActive = true;
                     log(channelId, `Streamer activated: first append`);
                   }
-                  return streamer.append({ markdown_text: deltaText });
+                  await streamer.append({ markdown_text: deltaText });
+                  // Post stop button after first successful append (appears below stream)
+                  ensureStopButton();
                 }).catch((err: any) => {
                   if (!streamFailed) {
                     logErr(channelId, `Streaming failed, falling back to chat.update: ${err.message}`);
@@ -262,14 +272,15 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
                   lastUpdateTime = now;
                   updateCount++;
                   log(channelId, `chat.update #${updateCount}: ${accumulatedText.length} chars`);
-                  lastUpdatePromise = client.chat
-                    .update({
+                  lastUpdatePromise = ensureStopButton().then(() => {
+                    if (!stopMsgTs) return;
+                    return client.chat.update({
                       channel: channelId,
                       ts: stopMsgTs,
                       text: accumulatedText,
                       blocks: buildBlocks(accumulatedText, threadTs, true),
-                    })
-                    .catch((err: any) => logErr(channelId, `chat.update failed: ${err.message}`));
+                    });
+                  }).catch((err: any) => logErr(channelId, `chat.update failed: ${err.message}`));
                 }
               }
             } else if (evt?.delta?.type === "input_json_delta") {
@@ -391,47 +402,40 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
           await streamer.append({ markdown_text: "\n\n_Stopped by user._" }).catch(() => {});
         }
 
-        // Stop the stream and capture its message ts
-        let streamMsgTs: string | undefined;
+        // Finalize stream as a durable message with feedback/disclaimer blocks
         try {
-          const stopResponse = await streamer.stop();
-          streamMsgTs = stopResponse.ts;
-          log(channelId, `Stream stopped: streamMsgTs=${streamMsgTs}`);
+          await streamer.stop({ blocks: finalizationBlocks });
+          log(channelId, `Stream finalized with blocks (${accumulatedText.length} chars)`);
         } catch (err: any) {
           logErr(channelId, `streamer.stop failed: ${err.message}`);
         }
 
-        // Delete the stream message and the stop-button carrier
-        if (streamMsgTs) {
-          await client.chat.delete({ channel: channelId, ts: streamMsgTs }).catch((err: any) => {
-            logErr(channelId, `Failed to delete stream message: ${err.message}`);
+        // Delete only the stop-button carrier
+        if (stopMsgTs) {
+          await client.chat.delete({ channel: channelId, ts: stopMsgTs }).catch((err: any) => {
+            logErr(channelId, `Failed to delete stop button carrier: ${err.message}`);
           });
         }
-        await client.chat.delete({ channel: channelId, ts: stopMsgTs }).catch(() => {});
-
-        // Post a durable message with the full accumulated text
-        const finalText = stopped
-          ? (accumulatedText ? accumulatedText + "\n\n_Stopped by user._" : "_Stopped by user._")
-          : (accumulatedText || "No response.");
-        await client.chat.postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: finalText,
-          blocks: [...buildBlocks(finalText, threadTs, false), ...finalizationBlocks],
-        }).catch((err: any) => logErr(channelId, `Final postMessage failed: ${err.message}`));
-
-        log(channelId, `Stream replaced with durable message (${finalText.length} chars)`);
       } else if (!streamFailed && !streamerActive) {
         const text = stopped
           ? "_Stopped by user._"
           : code !== 0 ? "Something went wrong." : "No response.";
         log(channelId, `No text produced, final message: "${text}"`);
-        await client.chat.update({
-          channel: channelId,
-          ts: stopMsgTs,
-          text,
-          blocks: [...buildBlocks(text, threadTs, false), ...finalizationBlocks],
-        }).catch((err: any) => logErr(channelId, `Final update failed: ${err.message}`));
+        if (stopMsgTs) {
+          await client.chat.update({
+            channel: channelId,
+            ts: stopMsgTs,
+            text,
+            blocks: [...buildBlocks(text, threadTs, false), ...finalizationBlocks],
+          }).catch((err: any) => logErr(channelId, `Final update failed: ${err.message}`));
+        } else {
+          await client.chat.postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text,
+            blocks: [...buildBlocks(text, threadTs, false), ...finalizationBlocks],
+          }).catch((err: any) => logErr(channelId, `Final postMessage failed: ${err.message}`));
+        }
       } else {
         // Fallback: chat.update mode
         let finalText: string;
@@ -444,16 +448,28 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
         }
 
         await lastUpdatePromise;
+        await ensureStopButton();
 
         log(channelId, `Sending final chat.update (${finalText.length} chars)`);
-        await client.chat
-          .update({
-            channel: channelId,
-            ts: stopMsgTs,
-            text: finalText,
-            blocks: [...buildBlocks(finalText, threadTs, false), ...finalizationBlocks],
-          })
-          .catch((err: any) => logErr(channelId, `Final chat.update failed: ${err.message}`));
+        if (stopMsgTs) {
+          await client.chat
+            .update({
+              channel: channelId,
+              ts: stopMsgTs,
+              text: finalText,
+              blocks: [...buildBlocks(finalText, threadTs, false), ...finalizationBlocks],
+            })
+            .catch((err: any) => logErr(channelId, `Final chat.update failed: ${err.message}`));
+        } else {
+          await client.chat
+            .postMessage({
+              channel: channelId,
+              thread_ts: threadTs,
+              text: finalText,
+              blocks: [...buildBlocks(finalText, threadTs, false), ...finalizationBlocks],
+            })
+            .catch((err: any) => logErr(channelId, `Final postMessage failed: ${err.message}`));
+        }
       }
 
       // Clear Assistant status indicator
