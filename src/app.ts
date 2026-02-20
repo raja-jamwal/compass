@@ -5,7 +5,7 @@ import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
 
-// --- Environment loading (precedence: real env > --env-file > ~/.claude-slacker/.env > local .env) ---
+// --- Environment loading (precedence: real env > --env-file > ~/.compass/.env > local .env) ---
 // Snapshot real env vars so we can restore them after file-based loading
 const realEnv = { ...process.env };
 
@@ -13,7 +13,7 @@ const realEnv = { ...process.env };
 dotenv.config();
 
 // 2. Home-dir config (overrides local .env)
-const homeEnv = path.join(os.homedir(), ".claude-slacker", ".env");
+const homeEnv = path.join(os.homedir(), ".compass", ".env");
 if (fs.existsSync(homeEnv)) {
   dotenv.config({ path: homeEnv, override: true });
 }
@@ -643,11 +643,11 @@ async function processMessage({ channelId, threadTs, userText, userId, client }:
       "mcp", "add",
       "--transport", "stdio",
       "--scope", "user",
-      "claude-slacker",
+      "compass",
       "--",
       "bun", mcpServerPath,
     ], { encoding: "utf-8", timeout: 10000, env: mcpEnv as NodeJS.ProcessEnv, stdio: ["pipe", "pipe", "pipe"] });
-    log(null, `MCP server registered: claude-slacker -> ${mcpServerPath}`);
+    log(null, `MCP server registered: compass -> ${mcpServerPath}`);
   } catch (err: any) {
     logErr(null, `Failed to register MCP server (non-fatal): ${err.message}`);
   }

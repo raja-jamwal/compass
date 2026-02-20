@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * Claude-slacker MCP Server
+ * Compass MCP Server
  *
  * Exposes bot management tools (reminders, teachings, etc.) via MCP stdio transport.
  * Can run standalone or be spawned by the Claude CLI as an MCP server.
@@ -39,7 +39,7 @@ const DEFAULT_BOT_USER_ID = process.env.SLACK_BOT_USER_ID || null;
 // ── Server ──────────────────────────────────────────────────
 
 const server = new McpServer({
-  name: "claude-slacker",
+  name: "compass",
   version: "1.0.0",
 });
 
@@ -277,7 +277,7 @@ server.registerTool(
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("claude-slacker MCP server running on stdio");
+  console.error("compass MCP server running on stdio");
 }
 
 main().catch((err) => {
