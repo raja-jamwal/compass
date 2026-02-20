@@ -50,6 +50,7 @@ import { buildHomeBlocks } from "./ui/blocks.ts";
 import { createAssistant } from "./handlers/assistant.ts";
 import { handleClaudeStream } from "./handlers/stream.ts";
 import { log, logErr, toSqliteDatetime } from "./lib/log.ts";
+import { fetchThreadContext } from "./lib/thread-context.ts";
 import type { ActiveProcessMap, Ref } from "./types.ts";
 
 const app = new App({
@@ -513,12 +514,13 @@ app.event("app_mention", async ({ event, client }: any) => {
     return;
   }
 
-  await processMessage({ channelId, threadTs, userText, userId, client });
+  await processMessage({ channelId, threadTs, messageTs: event.ts, userText, userId, client });
 });
 
 interface ProcessMessageOpts {
   channelId: string;
   threadTs: string;
+  messageTs: string;
   userText: string;
   userId: string;
   client: any;
@@ -528,7 +530,7 @@ interface ProcessMessageOpts {
  * Core message processing: session lookup, CWD gate, worktree setup, Claude spawn.
  * Called from app_mention handler and reminder polling loop.
  */
-async function processMessage({ channelId, threadTs, userText, userId, client }: ProcessMessageOpts): Promise<void> {
+async function processMessage({ channelId, threadTs, messageTs, userText, userId, client }: ProcessMessageOpts): Promise<void> {
   // ── Guard: already processing ─────────────────────────────
   if (activeProcesses.has(threadTs)) {
     log(channelId, `Rejecting — already processing`);
@@ -584,6 +586,19 @@ async function processMessage({ channelId, threadTs, userText, userId, client }:
     return;
   }
 
+  // ── Thread context (gap messages) ────────────────────────
+  let enrichedText = userText;
+  log(channelId, `Thread context check: messageTs=${messageTs} threadTs=${threadTs} inThread=${messageTs !== threadTs}`);
+  if (messageTs !== threadTs) {
+    const context = await fetchThreadContext(client, channelId, threadTs, messageTs, cachedBotUserIdRef.value);
+    if (context) {
+      enrichedText = context + enrichedText;
+      log(channelId, `Enriched prompt: ${enrichedText.length} chars (was ${userText.length})`);
+    } else {
+      log(channelId, `No thread context returned`);
+    }
+  }
+
   // ── Worktree setup ────────────────────────────────────────
   let spawnCwd = effectiveCwd;
   const existingWt = getWorktree(threadTs);
@@ -609,7 +624,7 @@ async function processMessage({ channelId, threadTs, userText, userId, client }:
 
   // ── Delegate to stream handler (no-op setStatus for channels) ─
   await handleClaudeStream({
-    channelId, threadTs, userText, userId, client,
+    channelId, threadTs, userText: enrichedText, userId, client,
     spawnCwd, isResume, sessionId,
     setStatus: async () => {},
     activeProcesses,
@@ -725,6 +740,7 @@ async function processMessage({ channelId, threadTs, userText, userId, client }:
           await processMessage({
             channelId: reminder.channel_id,
             threadTs,
+            messageTs: posted.ts!,
             userText: reminder.content,
             userId: reminder.user_id,
             client: app.client,

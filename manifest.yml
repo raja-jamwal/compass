@@ -41,6 +41,7 @@ oauth_config:
     bot:
       - channels:history
       - channels:read
+      - groups:history
       - chat:write
       - im:history
       - im:read
