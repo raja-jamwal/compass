@@ -622,11 +622,22 @@ async function processMessage({ channelId, threadTs, messageTs, userText, userId
     }
   }
 
-  // ── Delegate to stream handler (no-op setStatus for channels) ─
+  // ── Delegate to stream handler ──────────────────────────────
   await handleClaudeStream({
     channelId, threadTs, userText: enrichedText, userId, client,
     spawnCwd, isResume, sessionId,
-    setStatus: async () => {},
+    setStatus: async (statusOrOpts) => {
+      const params = typeof statusOrOpts === "string"
+        ? { status: statusOrOpts }
+        : statusOrOpts;
+      await client.assistant.threads.setStatus({
+        channel_id: channelId,
+        thread_ts: threadTs,
+        ...params,
+      }).catch((err: any) => {
+        logErr(channelId, `setStatus failed (channel): ${err.message}`);
+      });
+    },
     activeProcesses,
     cachedTeamId: cachedTeamIdRef.value,
     botUserId: cachedBotUserIdRef.value,

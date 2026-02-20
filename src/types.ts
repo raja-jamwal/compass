@@ -101,7 +101,7 @@ export interface HandleClaudeStreamOpts {
   spawnCwd: string;
   isResume: boolean;
   sessionId: string;
-  setStatus: (status: string) => Promise<void>;
+  setStatus: (status: string | { status: string; loading_messages?: string[] }) => Promise<void>;
   activeProcesses: ActiveProcessMap;
   cachedTeamId: string | null;
   botUserId: string | null;
