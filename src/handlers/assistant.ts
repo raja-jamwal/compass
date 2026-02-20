@@ -76,7 +76,12 @@ export function createAssistant(
           markWorktreeCleaned(threadTs);
           log(channelId, `CWD set via $cwd to: ${pathArg} (session reset)`);
           try {
-            await say(`Working directory set to \`${pathArg}\``);
+            await client.chat.postEphemeral({
+              channel: channelId,
+              thread_ts: threadTs,
+              user: message.user,
+              text: `Working directory set to \`${pathArg}\``,
+            });
             // Update suggested prompts with CWD context
             await setSuggestedPrompts(buildSuggestedPrompts(pathArg));
           } catch (err: any) {
@@ -106,7 +111,7 @@ export function createAssistant(
                 placeholder: { type: "plain_text", text: "Choose a directory..." },
                 options: history.map((h) => ({
                   text: { type: "plain_text", text: h.path },
-                  value: h.path,
+                  value: JSON.stringify({ path: h.path, threadTs, isTopLevel: false }),
                 })),
               }],
             },
@@ -135,13 +140,14 @@ export function createAssistant(
         );
 
         try {
-          await client.chat.postMessage({
+          await client.chat.postEphemeral({
             channel: channelId,
             thread_ts: threadTs,
+            user: message.user,
             blocks,
             text: "Set working directory",
           });
-          log(channelId, `$cwd picker sent`);
+          log(channelId, `$cwd picker sent (ephemeral to user=${message.user})`);
         } catch (err: any) {
           logErr(channelId, `Failed to send $cwd picker: ${err.message}`);
         }

@@ -106,9 +106,7 @@ app.action("stop_claude", async ({ action, ack, body }: any) => {
 app.action("cwd_pick", async ({ action, ack, client, body }: any) => {
   await ack();
   const channelId = body.channel?.id || body.container?.channel_id;
-  const threadTs = body.message?.thread_ts || body.message?.ts;
-  const chosenPath = action.selected_option.value;
-  const isTopLevel = action.block_id === "cwd_picker_block_toplevel";
+  const { path: chosenPath, threadTs, isTopLevel } = JSON.parse(action.selected_option.value);
 
   const sessionKey = threadTs || channelId;
   if (!getSession(sessionKey)) {
@@ -129,9 +127,10 @@ app.action("cwd_pick", async ({ action, ack, client, body }: any) => {
   const confirmText = isTopLevel
     ? `Working directory set to \`${chosenPath}\` (default for this channel)`
     : `Working directory set to \`${chosenPath}\``;
-  await client.chat.postMessage({
+  await client.chat.postEphemeral({
     channel: channelId,
     thread_ts: threadTs,
+    user: body.user?.id,
     text: confirmText,
   });
 });
@@ -269,9 +268,10 @@ app.view("cwd_modal", async ({ view, ack, client }: any) => {
   const confirmText = isTopLevel
     ? `Working directory set to \`${chosenPath}\` (default for this channel)`
     : `Working directory set to \`${chosenPath}\``;
-  await client.chat.postMessage({
+  await client.chat.postEphemeral({
     channel: channelId,
     thread_ts: threadTs,
+    user: view.user?.id,
     text: confirmText,
   });
 });
@@ -411,7 +411,7 @@ app.event("app_mention", async ({ event, client }: any) => {
         ? `Working directory set to \`${pathArg}\` (default for this channel)`
         : `Working directory set to \`${pathArg}\``;
       try {
-        await client.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: confirmText });
+        await client.chat.postEphemeral({ channel: channelId, thread_ts: threadTs, user: userId, text: confirmText });
       } catch (err: any) {
         logErr(channelId, `$cwd set reply failed: ${err.message}`);
       }
@@ -430,14 +430,14 @@ app.event("app_mention", async ({ event, client }: any) => {
           { type: "section", text: { type: "mrkdwn", text: "*Recent directories:*" } },
           {
             type: "actions",
-            block_id: isTopLevel ? "cwd_picker_block_toplevel" : "cwd_picker_block",
+            block_id: "cwd_picker_block",
             elements: [{
               type: "static_select",
               action_id: "cwd_pick",
               placeholder: { type: "plain_text", text: "Choose a directory..." },
               options: history.map((h) => ({
                 text: { type: "plain_text", text: h.path },
-                value: h.path,
+                value: JSON.stringify({ path: h.path, threadTs, isTopLevel }),
               })),
             }],
           },
@@ -466,13 +466,14 @@ app.event("app_mention", async ({ event, client }: any) => {
       );
 
       try {
-        await client.chat.postMessage({
+        await client.chat.postEphemeral({
           channel: channelId,
           thread_ts: threadTs,
+          user: userId,
           blocks: pickerBlocks,
           text: "Set working directory",
         });
-        log(channelId, `$cwd picker sent`);
+        log(channelId, `$cwd picker sent (ephemeral to user=${userId})`);
       } catch (err: any) {
         logErr(channelId, `$cwd picker reply failed: ${err.message}`);
       }
