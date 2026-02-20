@@ -176,6 +176,27 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
   // Tool tracking for agentic visualization
   const activeTools = new Map<number, { name: string; inputJson: string; taskId: string }>();
   let taskIdCounter = 0;
+  let thinkingTaskDone = false;
+
+  // ── Start stream immediately for instant visual feedback ──
+  if (!streamFailed) {
+    appendChain = appendChain.then(() => {
+      streamerActive = true;
+      log(channelId, `Streamer activated: initial "Thinking..." indicator`);
+      return streamer.append({
+        chunks: [{
+          type: "task_update",
+          id: "thinking",
+          title: "Thinking...",
+          status: "in_progress",
+        }],
+      });
+    }).catch((err: any) => {
+      logErr(channelId, `Initial stream start failed, using fallback: ${err.message}`);
+      streamerActive = false;
+      streamFailed = true;
+    });
+  }
 
   log(channelId, `Claude process started: pid=${proc.pid}, session=${sessionId}, resume=${isResume}, streaming=${!streamFailed}`);
 
@@ -206,6 +227,16 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
 
           } else if (evt?.type === "content_block_start") {
             log(channelId, `stream: content_block_start index=${evt.index} type=${evt.content_block?.type}`);
+
+            // Complete the initial "Thinking..." indicator
+            if (!thinkingTaskDone && !streamFailed) {
+              thinkingTaskDone = true;
+              appendChain = appendChain.then(() =>
+                streamer.append({
+                  chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" }],
+                })
+              ).catch(() => {});
+            }
 
             // Track tool_use blocks for agentic visualization
             if (evt.content_block?.type === "tool_use") {
@@ -398,6 +429,15 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
       log(channelId, `Finalize path: streamFailed=${streamFailed} streamerActive=${streamerActive}`);
       if (!streamFailed && streamerActive) {
         await appendChain;
+
+        // Complete the thinking indicator if it never got resolved
+        if (!thinkingTaskDone) {
+          thinkingTaskDone = true;
+          await streamer.append({
+            chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" }],
+          }).catch(() => {});
+        }
+
         if (stopped) {
           await streamer.append({ markdown_text: "\n\n_Stopped by user._" }).catch(() => {});
         }
