@@ -4,9 +4,20 @@
  * Spawns the Claude CLI, parses NDJSON events, streams text to Slack via
  * chatStream (with chat.update fallback), emits TaskUpdateChunks for tool
  * calls, and logs usage on completion.
+ *
+ * Supports two display modes:
+ *   - "plan"     – used when Claude enters plan mode (EnterPlanMode tool).
+ *                  Shows a plan_update title + grouped task_update steps.
+ *   - "timeline" – default mode for normal tool-use / implementation.
+ *                  Shows individual task cards interleaved with streamed text.
+ *
+ * The display mode is detected from the first content_block_start event and
+ * the streamer is created lazily so we can pick the right mode.
  */
 
 import { spawn } from "child_process";
+import { appendFileSync, writeFileSync } from "fs";
+import { join } from "path";
 import { getTeachings, upsertSession, addUsageLog } from "../db.ts";
 import {
   buildBlocks, buildStopOnlyBlocks, buildFeedbackBlock, buildDisclaimerBlock,
@@ -14,8 +25,15 @@ import {
 import { log, logErr } from "../lib/log.ts";
 import type { HandleClaudeStreamOpts } from "../types.ts";
 
+// ── Temporary debug: dump raw NDJSON to file ──────────────────
+const STREAM_DEBUG = process.env.STREAM_DEBUG === "1";
+const STREAM_DEBUG_FILE = join(import.meta.dir, "..", "stream-debug.jsonl");
+
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const UPDATE_INTERVAL_MS = 750;
+
+/** Tools that are internal / meta and should be hidden or shown differently */
+const HIDDEN_TOOLS = new Set(["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"]);
 
 const TOOL_STATUS_MAP: Record<string, string> = {
   Read: "is reading files...",
@@ -26,7 +44,13 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   Grep: "is searching code...",
   WebFetch: "is fetching web content...",
   WebSearch: "is searching the web...",
-  Task: "is delegating a task...",
+  Task: "is running a sub-agent...",
+  EnterPlanMode: "is planning...",
+  ExitPlanMode: "is finalizing the plan...",
+  TaskCreate: "is creating tasks...",
+  TaskUpdate: "is updating tasks...",
+  TodoWrite: "is updating tasks...",
+  NotebookEdit: "is editing a notebook...",
 };
 
 export function toolTitle(toolName: string, toolInput: any): string {
@@ -46,6 +70,19 @@ export function toolTitle(toolName: string, toolInput: any): string {
         return `Search: ${toolInput.pattern || "files"}`;
       case "Grep":
         return `Search: ${toolInput.pattern || "code"}`;
+      case "Task": {
+        const desc = toolInput.description || toolInput.subagent_type || "task";
+        return `Sub-agent: ${desc}`;
+      }
+      case "EnterPlanMode":
+        return "Entering plan mode";
+      case "ExitPlanMode":
+        return "Plan ready";
+      case "TaskCreate":
+      case "TodoWrite":
+        return `Create task: ${toolInput.subject || toolInput.description || "task"}`;
+      case "TaskUpdate":
+        return `Update task: ${toolInput.subject || toolInput.status || "task"}`;
       default:
         return `${toolName}`;
     }
@@ -86,23 +123,57 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
     return stopBtnPromise;
   }
 
-  // ── Create chat streamer (lazy — starts on first append) ──
+  // ── Streamer: created lazily to pick the right display mode ──
   let streamer: any = null;
-  if (cachedTeamId) {
+  let displayMode: "plan" | "timeline" | null = null;
+  let streamerActive = false;
+  let streamFailed = !cachedTeamId;
+
+  if (!cachedTeamId) {
+    log(channelId, `No cached team_id, using chat.update fallback`);
+  }
+
+  /**
+   * Create the chat streamer with the chosen display mode.
+   * Called once, on the first meaningful content event.
+   */
+  function initStreamer(mode: "plan" | "timeline") {
+    if (streamer) return; // already created
+    displayMode = mode;
     try {
       streamer = client.chatStream({
         channel: channelId,
         thread_ts: threadTs,
         recipient_team_id: cachedTeamId,
         recipient_user_id: userId,
-        task_display_mode: "timeline",
+        task_display_mode: mode,
       });
-      log(channelId, `ChatStream created (lazy, task_display_mode=timeline)`);
+      log(channelId, `Streamer created: task_display_mode=${mode}`);
     } catch (err: any) {
-      logErr(channelId, `chatStream creation failed, using fallback: ${err.message}`);
+      logErr(channelId, `Streamer creation failed (${mode}): ${err.message}`);
+      streamFailed = true;
     }
-  } else {
-    log(channelId, `No cached team_id, using chat.update fallback`);
+  }
+
+  /**
+   * Ensure the streamer exists (defaults to timeline if not yet created),
+   * then append chunks/text. Handles the appendChain serialization.
+   */
+  function safeAppend(payload: any) {
+    if (streamFailed) return;
+    if (!streamer) initStreamer("timeline");
+    appendChain = appendChain.then(async () => {
+      if (!streamerActive) {
+        streamerActive = true;
+        log(channelId, `Streamer activated`);
+      }
+      await streamer.append(payload);
+    }).catch((err: any) => {
+      if (!streamFailed) {
+        logErr(channelId, `Stream append failed: ${err.message}`);
+        streamFailed = true;
+      }
+    });
   }
 
   // ── Build Claude args ─────────────────────────────────────
@@ -161,8 +232,6 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
 
   let accumulatedText = "";
   let appendChain = Promise.resolve();
-  let streamerActive = false;
-  let streamFailed = !streamer;
   let lastUpdateTime = 0;
   let lastUpdatePromise = Promise.resolve();
   let updateCount = 0;
@@ -174,31 +243,27 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
   const startTime = Date.now();
 
   // Tool tracking for agentic visualization
-  const activeTools = new Map<number, { name: string; inputJson: string; taskId: string }>();
+  // Maps content_block index → tool info (including the tool_use_id for sub-agent correlation)
+  const activeTools = new Map<number, {
+    name: string;
+    inputJson: string;
+    taskId: string;
+    toolUseId: string;
+  }>();
   let taskIdCounter = 0;
   let thinkingTaskDone = false;
+  let planModeActive = false;
 
-  // ── Start stream immediately for instant visual feedback ──
-  if (!streamFailed) {
-    appendChain = appendChain.then(() => {
-      streamerActive = true;
-      log(channelId, `Streamer activated: initial "Thinking..." indicator`);
-      return streamer.append({
-        chunks: [{
-          type: "task_update",
-          id: "thinking",
-          title: "Thinking...",
-          status: "in_progress",
-        }],
-      });
-    }).catch((err: any) => {
-      logErr(channelId, `Initial stream start failed, using fallback: ${err.message}`);
-      streamerActive = false;
-      streamFailed = true;
-    });
-  }
+  // Sub-agent tracking: maps a Task tool_use_id → its visual task info
+  const subAgentTasks = new Map<string, { description: string; taskId: string }>();
 
   log(channelId, `Claude process started: pid=${proc.pid}, session=${sessionId}, resume=${isResume}, streaming=${!streamFailed}`);
+
+  // Clear debug file for this run
+  if (STREAM_DEBUG) {
+    writeFileSync(STREAM_DEBUG_FILE, "");
+    log(channelId, `[STREAM_DEBUG] Dumping raw NDJSON to ${STREAM_DEBUG_FILE}`);
+  }
 
   proc.stdout!.on("data", (chunk: Buffer) => {
     const raw = chunk.toString();
@@ -208,9 +273,16 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
 
     for (const line of lines) {
       if (!line.trim()) continue;
+
+      // Dump every raw line to debug file
+      if (STREAM_DEBUG) {
+        try { appendFileSync(STREAM_DEBUG_FILE, line + "\n"); } catch {}
+      }
+
       try {
         const data = JSON.parse(line);
 
+        // ── system messages ────────────────────────────────
         if (data.type === "system") {
           log(channelId, `stream: type=system subtype=${data.subtype} session_id=${data.session_id} model=${data.model || "n/a"}`);
           if (data.subtype === "init" && data.session_id) {
@@ -218,53 +290,112 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
             sessionId = data.session_id;
             upsertSession(threadTs, data.session_id);
             log(channelId, `Session ID updated: ${oldId} -> ${data.session_id}`);
+          } else if (data.subtype === "status") {
+            // Track permission mode changes (plan mode entry/exit)
+            if (data.permissionMode === "plan") {
+              planModeActive = true;
+              log(channelId, `stream: plan mode activated (permissionMode=plan)`);
+            } else if (planModeActive && data.permissionMode !== "plan") {
+              planModeActive = false;
+              log(channelId, `stream: plan mode deactivated (permissionMode=${data.permissionMode})`);
+            }
           }
+
+        // ── stream_event (raw Claude API events) ──────────
         } else if (data.type === "stream_event") {
           const evt = data.event;
+          const parentId = data.parent_tool_use_id;
+
+          // ── Sub-agent stream events: update parent task details ──
+          if (parentId && subAgentTasks.has(parentId)) {
+            // Sub-agent events are typically complete messages, but if any
+            // stream_events leak through with a parent_tool_use_id, log them.
+            if (evt?.type === "content_block_start" && evt.content_block?.type === "tool_use") {
+              const subTool = evt.content_block.name;
+              const parentTask = subAgentTasks.get(parentId)!;
+              const detail = TOOL_STATUS_MAP[subTool] || `Using ${subTool}...`;
+              safeAppend({
+                chunks: [{
+                  type: "task_update",
+                  id: parentTask.taskId,
+                  title: parentTask.description,
+                  status: "in_progress" as const,
+                  details: detail,
+                }],
+              });
+            }
+            continue; // don't process sub-agent stream_events as top-level
+          }
 
           if (evt?.type === "message_start") {
             log(channelId, `stream: message_start model=${evt.message?.model} id=${evt.message?.id}`);
 
           } else if (evt?.type === "content_block_start") {
-            log(channelId, `stream: content_block_start index=${evt.index} type=${evt.content_block?.type}`);
+            const blockType = evt.content_block?.type;
+            log(channelId, `stream: content_block_start index=${evt.index} type=${blockType}`);
 
-            // Complete the initial "Thinking..." indicator
-            if (!thinkingTaskDone && !streamFailed) {
-              thinkingTaskDone = true;
-              appendChain = appendChain.then(() =>
-                streamer.append({
-                  chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" }],
-                })
-              ).catch(() => {});
+            // ── Plan mode detection on first content block ──
+            if (blockType === "tool_use" && evt.content_block.name === "EnterPlanMode" && !streamer) {
+              // First event is EnterPlanMode → create plan streamer
+              initStreamer("plan");
+              safeAppend({
+                chunks: [{
+                  type: "plan_update",
+                  title: "Planning...",
+                }],
+              });
+              log(channelId, `Plan mode: created plan streamer with plan_update title`);
             }
 
-            // Track tool_use blocks for agentic visualization
-            if (evt.content_block?.type === "tool_use") {
-              const toolName = evt.content_block.name;
-              const taskId = `task_${++taskIdCounter}`;
-              activeTools.set(evt.index, { name: toolName, inputJson: "", taskId });
+            // ── Ensure streamer exists for any content ──
+            if (!streamer && !streamFailed) {
+              initStreamer("timeline");
+            }
 
-              // Update status
+            // ── Complete the initial "Thinking..." indicator ──
+            if (!thinkingTaskDone && !streamFailed) {
+              thinkingTaskDone = true;
+              if (displayMode === "timeline") {
+                // In timeline: show thinking as a completed task
+                safeAppend({
+                  chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" as const }],
+                });
+              }
+              // In plan mode: no separate thinking indicator needed (plan_update serves that role)
+            }
+
+            // ── Track tool_use blocks for agentic visualization ──
+            if (blockType === "tool_use") {
+              const toolName = evt.content_block.name;
+              const toolUseId = evt.content_block.id || "";
+              const taskId = `task_${++taskIdCounter}`;
+              activeTools.set(evt.index, { name: toolName, inputJson: "", taskId, toolUseId });
+
+              // Update Slack status bar
               const statusMsg = TOOL_STATUS_MAP[toolName] || `is using ${toolName}...`;
               setStatus(statusMsg).catch(() => {});
-              log(channelId, `Tool start: ${toolName} (index=${evt.index}, taskId=${taskId})`);
+              log(channelId, `Tool start: ${toolName} (index=${evt.index}, taskId=${taskId}, toolUseId=${toolUseId})`);
 
-              // Emit in-progress task chunk
-              if (!streamFailed) {
-                appendChain = appendChain.then(() =>
-                  streamer.append({
-                    chunks: [{
-                      type: "task_update",
-                      id: taskId,
-                      title: `Using ${toolName}...`,
-                      status: "in_progress",
-                    }],
-                  })
-                ).catch((err: any) => {
-                  if (!streamFailed) {
-                    logErr(channelId, `Task chunk (in_progress) failed: ${err.message}`);
-                  }
+              // Emit in-progress task chunk (skip hidden/meta tools)
+              if (!HIDDEN_TOOLS.has(toolName)) {
+                safeAppend({
+                  chunks: [{
+                    type: "task_update",
+                    id: taskId,
+                    title: `Using ${toolName}...`,
+                    status: "in_progress" as const,
+                  }],
                 });
+              }
+            }
+
+            // ── Thinking block: show indicator ──
+            if (blockType === "thinking") {
+              log(channelId, `stream: thinking block started (index=${evt.index})`);
+              if (displayMode === "plan") {
+                setStatus("is planning...").catch(() => {});
+              } else {
+                setStatus("is thinking...").catch(() => {});
               }
             }
 
@@ -278,15 +409,29 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
                 log(channelId, `stream: text_delta #${deltaCount}, accumulated=${accumulatedText.length} chars`);
               }
 
+              // Ensure streamer exists for text content
+              if (!streamer && !streamFailed) {
+                initStreamer("timeline");
+              }
+
+              // Complete thinking indicator if this is the first text
+              if (!thinkingTaskDone && !streamFailed) {
+                thinkingTaskDone = true;
+                if (displayMode === "timeline") {
+                  safeAppend({
+                    chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" as const }],
+                  });
+                }
+              }
+
               // Streaming path: use chatStream
               if (!streamFailed) {
                 appendChain = appendChain.then(async () => {
                   if (!streamerActive) {
                     streamerActive = true;
-                    log(channelId, `Streamer activated: first append`);
+                    log(channelId, `Streamer activated: first text append`);
                   }
                   await streamer.append({ markdown_text: deltaText });
-                  // Post stop button after first successful append (appears below stream)
                   ensureStopButton();
                 }).catch((err: any) => {
                   if (!streamFailed) {
@@ -320,6 +465,8 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
               if (tool) {
                 tool.inputJson += evt.delta.partial_json || "";
               }
+            } else if (evt?.delta?.type === "thinking_delta") {
+              // Extended thinking — no visual output, just log occasionally
             }
 
           } else if (evt?.type === "content_block_stop") {
@@ -335,26 +482,36 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
               const title = toolTitle(tool.name, parsedInput);
               log(channelId, `Tool complete: ${tool.name} -> "${title}"`);
 
-              // Emit complete task chunk
-              if (!streamFailed) {
-                appendChain = appendChain.then(() =>
-                  streamer.append({
-                    chunks: [{
-                      type: "task_update",
-                      id: tool.taskId,
-                      title,
-                      status: "complete",
-                    }],
-                  })
-                ).catch((err: any) => {
-                  if (!streamFailed) {
-                    logErr(channelId, `Task chunk (complete) failed: ${err.message}`);
-                  }
+              // ── Special handling: Task (sub-agent) ──
+              if (tool.name === "Task") {
+                const desc = parsedInput.description || parsedInput.subagent_type || "Sub-agent";
+                subAgentTasks.set(tool.toolUseId, { description: `Sub-agent: ${desc}`, taskId: tool.taskId });
+                log(channelId, `Sub-agent registered: toolUseId=${tool.toolUseId} desc="${desc}"`);
+                // Don't mark complete yet — it completes when the sub-agent finishes
+                // (we'll get a type=user tool_result for this toolUseId)
+              } else if (HIDDEN_TOOLS.has(tool.name)) {
+                // Hidden tools (EnterPlanMode, ExitPlanMode, AskUserQuestion):
+                // no task_update emitted on start, so nothing to complete.
+                // But update plan title on ExitPlanMode
+                if (tool.name === "ExitPlanMode" && displayMode === "plan") {
+                  safeAppend({
+                    chunks: [{ type: "plan_update", title: "Plan ready" }],
+                  });
+                }
+              } else {
+                // Normal tool: emit complete task chunk
+                safeAppend({
+                  chunks: [{
+                    type: "task_update",
+                    id: tool.taskId,
+                    title,
+                    status: "complete" as const,
+                  }],
                 });
               }
 
-              // Reset status to thinking
-              setStatus("is thinking...").catch(() => {});
+              // Reset status to thinking/planning
+              setStatus(planModeActive ? "is planning..." : "is thinking...").catch(() => {});
             }
 
           } else if (evt?.type === "message_delta") {
@@ -365,10 +522,101 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
             log(channelId, `stream: stream_event type=${evt?.type}`);
           }
 
+        // ── assistant messages (complete turn) ────────────
         } else if (data.type === "assistant") {
+          const parentId = data.parent_tool_use_id;
           const content = data.message?.content;
-          const textLen = content?.[0]?.text?.length || 0;
-          log(channelId, `stream: assistant message, content_length=${textLen} chars`);
+          const model = data.message?.model || "unknown";
+
+          if (parentId && subAgentTasks.has(parentId)) {
+            // Sub-agent assistant message: extract tool calls to update details
+            const parentTask = subAgentTasks.get(parentId)!;
+            const toolCalls = (content || []).filter((c: any) => c.type === "tool_use");
+            if (toolCalls.length > 0) {
+              const toolNames = toolCalls.map((t: any) => t.name).join(", ");
+              log(channelId, `stream: sub-agent (${model}) tools: ${toolNames} [parent=${parentId}]`);
+              // Update the sub-agent task's details with what it's doing
+              const lastTool = toolCalls[toolCalls.length - 1];
+              let detail = TOOL_STATUS_MAP[lastTool.name] || `Using ${lastTool.name}...`;
+              // Try to get a more specific detail from the tool input
+              try {
+                if (lastTool.name === "Read" && lastTool.input?.file_path) {
+                  detail = `Reading ${lastTool.input.file_path.split("/").pop()}`;
+                } else if (lastTool.name === "Grep" && lastTool.input?.pattern) {
+                  detail = `Searching: ${lastTool.input.pattern}`;
+                } else if (lastTool.name === "Glob" && lastTool.input?.pattern) {
+                  detail = `Finding: ${lastTool.input.pattern}`;
+                } else if (lastTool.name === "Bash" && lastTool.input?.command) {
+                  const cmd = lastTool.input.command;
+                  detail = `Running: ${cmd.length > 40 ? cmd.slice(0, 37) + "..." : cmd}`;
+                }
+              } catch {}
+              safeAppend({
+                chunks: [{
+                  type: "task_update",
+                  id: parentTask.taskId,
+                  title: parentTask.description,
+                  status: "in_progress" as const,
+                  details: detail,
+                }],
+              });
+            } else {
+              const textLen = content?.[0]?.text?.length || 0;
+              log(channelId, `stream: sub-agent (${model}) text response, len=${textLen} [parent=${parentId}]`);
+            }
+          } else {
+            const textLen = content?.[0]?.text?.length || 0;
+            log(channelId, `stream: assistant message (${model}), content_length=${textLen} chars`);
+          }
+
+        // ── user messages (tool results) ──────────────────
+        } else if (data.type === "user") {
+          const parentId = data.parent_tool_use_id;
+          const resultSummary = data.tool_use_result;
+          const content = data.message?.content;
+
+          if (parentId && subAgentTasks.has(parentId)) {
+            // Sub-agent tool result: update details
+            const parentTask = subAgentTasks.get(parentId)!;
+            // Check if this is the sub-agent's prompt (first user message) or a tool result
+            const firstBlock = content?.[0];
+            if (firstBlock?.type === "tool_result") {
+              log(channelId, `stream: sub-agent tool result [parent=${parentId}]`);
+            } else {
+              log(channelId, `stream: sub-agent prompt delivered [parent=${parentId}]`);
+            }
+          } else if (parentId === null || parentId === undefined) {
+            // Top-level tool result
+            const firstBlock = content?.[0];
+            const toolUseId = firstBlock?.tool_use_id;
+
+            // Check if this completes a sub-agent Task
+            if (toolUseId && subAgentTasks.has(toolUseId)) {
+              const subTask = subAgentTasks.get(toolUseId)!;
+              log(channelId, `stream: sub-agent completed: ${subTask.description} [toolUseId=${toolUseId}]`);
+              // Mark the sub-agent task as complete
+              safeAppend({
+                chunks: [{
+                  type: "task_update",
+                  id: subTask.taskId,
+                  title: subTask.description,
+                  status: "complete" as const,
+                  details: undefined,
+                }],
+              });
+              subAgentTasks.delete(toolUseId);
+            } else {
+              // Regular tool result
+              const summary = typeof resultSummary === "string"
+                ? resultSummary
+                : resultSummary?.message || "";
+              log(channelId, `stream: tool result${summary ? `: ${summary.substring(0, 80)}` : ""}`);
+            }
+          } else {
+            log(channelId, `stream: user message (parent=${parentId})`);
+          }
+
+        // ── result (final) ────────────────────────────────
         } else if (data.type === "result") {
           resultData = data;
           const elapsed = Date.now() - startTime;
@@ -403,7 +651,7 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
       const elapsed = Date.now() - startTime;
 
       log(channelId, `Claude process exited: code=${code} signal=${signal} pid=${proc.pid} elapsed=${elapsed}ms stopped=${stopped}`);
-      log(channelId, `Final stats: deltas=${deltaCount}, slack_updates=${updateCount}, text_length=${accumulatedText.length}, streaming=${streamerActive}`);
+      log(channelId, `Final stats: deltas=${deltaCount}, slack_updates=${updateCount}, text_length=${accumulatedText.length}, streaming=${streamerActive}, mode=${displayMode}`);
 
       // ── Usage logging ──────────────────────────────────
       if (resultData) {
@@ -423,6 +671,19 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
         }
       }
 
+      // ── Mark any remaining sub-agent tasks as complete ──
+      for (const [id, sub] of subAgentTasks) {
+        safeAppend({
+          chunks: [{
+            type: "task_update",
+            id: sub.taskId,
+            title: sub.description,
+            status: "complete" as const,
+          }],
+        });
+      }
+      subAgentTasks.clear();
+
       // ── Finalize streaming or fallback ─────────────────
       const finalizationBlocks = [buildFeedbackBlock(threadTs), buildDisclaimerBlock()];
 
@@ -431,7 +692,7 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
         await appendChain;
 
         // Complete the thinking indicator if it never got resolved
-        if (!thinkingTaskDone) {
+        if (!thinkingTaskDone && displayMode === "timeline") {
           thinkingTaskDone = true;
           await streamer.append({
             chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" }],
@@ -445,7 +706,7 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
         // Finalize stream as a durable message with feedback/disclaimer blocks
         try {
           await streamer.stop({ blocks: finalizationBlocks });
-          log(channelId, `Stream finalized with blocks (${accumulatedText.length} chars)`);
+          log(channelId, `Stream finalized with blocks (${accumulatedText.length} chars, mode=${displayMode})`);
         } catch (err: any) {
           logErr(channelId, `streamer.stop failed: ${err.message}`);
         }
@@ -456,19 +717,19 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
             logErr(channelId, `Failed to delete stop button carrier: ${err.message}`);
           });
         }
-      } else if (!streamFailed && !streamerActive) {
+      } else if (streamer && !streamerActive) {
+        // Streamer was created but never activated (no content appended)
         const text = stopped
           ? "_Stopped by user._"
           : code !== 0 ? "Something went wrong." : "No response.";
         log(channelId, `No text produced, final message: "${text}"`);
-        if (stopMsgTs) {
-          await client.chat.update({
-            channel: channelId,
-            ts: stopMsgTs,
-            text,
-            blocks: [...buildBlocks(text, threadTs, false), ...finalizationBlocks],
-          }).catch((err: any) => logErr(channelId, `Final update failed: ${err.message}`));
-        } else {
+
+        // Try to use the streamer for a clean message
+        try {
+          await streamer.append({ markdown_text: text });
+          await streamer.stop({ blocks: finalizationBlocks });
+        } catch {
+          // Streamer failed, fall back to postMessage
           await client.chat.postMessage({
             channel: channelId,
             thread_ts: threadTs,
@@ -477,7 +738,7 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
           }).catch((err: any) => logErr(channelId, `Final postMessage failed: ${err.message}`));
         }
       } else {
-        // Fallback: chat.update mode
+        // Fallback: chat.update mode (no streamer or stream failed)
         let finalText: string;
         if (stopped) {
           finalText = accumulatedText
