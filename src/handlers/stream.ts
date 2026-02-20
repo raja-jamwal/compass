@@ -95,6 +95,42 @@ export function toolTitle(toolName: string, toolInput: any): string {
   }
 }
 
+const MAX_OUTPUT_LEN = 120;
+
+/**
+ * Extract a brief output summary from a tool result for display on task cards.
+ * Returns null if there's nothing meaningful to show.
+ */
+function extractToolOutput(resultSummary: any, contentBlock: any): string | null {
+  // Try the top-level tool_use_result summary first (concise)
+  let text: string | null = null;
+  if (typeof resultSummary === "string" && resultSummary.length > 0) {
+    text = resultSummary;
+  } else if (resultSummary?.message) {
+    text = resultSummary.message;
+  }
+
+  // Fall back to the content block's content field
+  if (!text && contentBlock?.content) {
+    const raw = typeof contentBlock.content === "string"
+      ? contentBlock.content
+      : JSON.stringify(contentBlock.content);
+    // Count lines for file/search results
+    const lines = raw.split("\n");
+    if (lines.length > 3) {
+      text = `${lines.length} lines`;
+    } else if (raw.length > 0 && raw.length <= MAX_OUTPUT_LEN) {
+      text = raw;
+    }
+  }
+
+  if (!text) return null;
+  // Strip "Error: " prefix noise from non-interactive tool stubs
+  if (text.startsWith("Error: ")) text = text.slice(7);
+  // Truncate
+  return text.length > MAX_OUTPUT_LEN ? text.slice(0, MAX_OUTPUT_LEN - 3) + "..." : text;
+}
+
 export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<void> {
   const {
     channelId, threadTs, userText, userId, client,
@@ -260,6 +296,10 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
 
   // Sub-agent tracking: maps a Task tool_use_id → its visual task info
   const subAgentTasks = new Map<string, { description: string; taskId: string }>();
+
+  // Completed tool tracking: maps tool_use_id → task info so we can update
+  // the task card with output/sources/error when the tool result arrives later.
+  const completedTools = new Map<string, { taskId: string; name: string; title: string }>();
 
   log(channelId, `Claude process started: pid=${proc.pid}, session=${sessionId}, resume=${isResume}, streaming=${!streamFailed}`);
 
@@ -531,14 +571,29 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
                 }
               } else {
                 // Normal tool: emit complete task chunk
+                // Attach sources for web tools (WebFetch, WebSearch)
+                const sources: { type: "url"; url: string; text: string }[] = [];
+                if (tool.name === "WebFetch" && parsedInput.url) {
+                  try {
+                    const hostname = new URL(parsedInput.url).hostname;
+                    sources.push({ type: "url", url: parsedInput.url, text: hostname });
+                  } catch {
+                    sources.push({ type: "url", url: parsedInput.url, text: parsedInput.url });
+                  }
+                }
+
                 safeAppend({
                   chunks: [{
                     type: "task_update",
                     id: tool.taskId,
                     title,
                     status: "complete" as const,
+                    ...(sources.length > 0 ? { sources } : {}),
                   }],
                 });
+
+                // Register for later output/error update when tool result arrives
+                completedTools.set(tool.toolUseId, { taskId: tool.taskId, name: tool.name, title });
               }
 
               // Reset status to thinking/planning
@@ -624,8 +679,9 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
             // Check if this completes a sub-agent Task
             if (toolUseId && subAgentTasks.has(toolUseId)) {
               const subTask = subAgentTasks.get(toolUseId)!;
+              // Extract a brief output summary from the result
+              const subOutput = extractToolOutput(resultSummary, firstBlock);
               log(channelId, `stream: sub-agent completed: ${subTask.description} [toolUseId=${toolUseId}]`);
-              // Mark the sub-agent task as complete
               safeAppend({
                 chunks: [{
                   type: "task_update",
@@ -633,11 +689,47 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
                   title: subTask.description,
                   status: "complete" as const,
                   details: undefined,
+                  ...(subOutput ? { output: subOutput } : {}),
                 }],
               });
               subAgentTasks.delete(toolUseId);
+
+            // Update a completed tool's task card with output or error status
+            } else if (toolUseId && completedTools.has(toolUseId)) {
+              const completed = completedTools.get(toolUseId)!;
+              completedTools.delete(toolUseId);
+
+              const isError = firstBlock?.is_error === true;
+              const output = extractToolOutput(resultSummary, firstBlock);
+
+              // Extract sources from WebSearch results (URLs in the content)
+              const sources: { type: "url"; url: string; text: string }[] = [];
+              if (completed.name === "WebSearch" && firstBlock?.content) {
+                const raw = typeof firstBlock.content === "string" ? firstBlock.content : "";
+                const urlRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+                let m: RegExpExecArray | null;
+                while ((m = urlRegex.exec(raw)) !== null && sources.length < 4) {
+                  sources.push({ type: "url", url: m[2], text: m[1] });
+                }
+              }
+
+              if (isError || output || sources.length > 0) {
+                log(channelId, `stream: tool result update taskId=${completed.taskId} error=${isError} sources=${sources.length}${output ? ` output="${output.substring(0, 60)}"` : ""}`);
+                safeAppend({
+                  chunks: [{
+                    type: "task_update",
+                    id: completed.taskId,
+                    title: completed.title,
+                    status: isError ? "error" as const : "complete" as const,
+                    ...(output ? { output } : {}),
+                    ...(sources.length > 0 ? { sources } : {}),
+                  }],
+                });
+              } else {
+                log(channelId, `stream: tool result (no output) [toolUseId=${toolUseId}]`);
+              }
             } else {
-              // Regular tool result
+              // Untracked tool result — just log
               const summary = typeof resultSummary === "string"
                 ? resultSummary
                 : resultSummary?.message || "";
