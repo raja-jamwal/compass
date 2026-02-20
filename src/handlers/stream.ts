@@ -33,7 +33,7 @@ const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const UPDATE_INTERVAL_MS = 750;
 
 /** Tools that are internal / meta and should be hidden or shown differently */
-const HIDDEN_TOOLS = new Set(["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"]);
+const HIDDEN_TOOLS = new Set(["EnterPlanMode", "ExitPlanMode"]);
 
 const TOOL_STATUS_MAP: Record<string, string> = {
   Read: "is reading files...",
@@ -73,6 +73,10 @@ export function toolTitle(toolName: string, toolInput: any): string {
       case "Task": {
         const desc = toolInput.description || toolInput.subagent_type || "task";
         return `Sub-agent: ${desc}`;
+      }
+      case "AskUserQuestion": {
+        const q = toolInput.questions?.[0]?.question;
+        return q ? `Question: ${q}` : "Asking a question...";
       }
       case "EnterPlanMode":
         return "Entering plan mode";
@@ -482,15 +486,42 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
               const title = toolTitle(tool.name, parsedInput);
               log(channelId, `Tool complete: ${tool.name} -> "${title}"`);
 
+              // ── Special handling: AskUserQuestion ──
+              // Render the question + options as visible content so the user
+              // sees what Claude wanted to ask (the tool itself errors in
+              // non-interactive mode, but the question is still valuable).
+              if (tool.name === "AskUserQuestion") {
+                const questions = parsedInput.questions || [];
+                const parts: string[] = [];
+                for (const q of questions) {
+                  if (q.question) parts.push(`> *${q.question}*`);
+                  for (const opt of q.options || []) {
+                    const desc = opt.description ? ` — ${opt.description}` : "";
+                    parts.push(`>  • ${opt.label}${desc}`);
+                  }
+                }
+                if (parts.length > 0) {
+                  safeAppend({ markdown_text: "\n" + parts.join("\n") + "\n\n" });
+                }
+                // Mark the task complete with the question as title
+                safeAppend({
+                  chunks: [{
+                    type: "task_update",
+                    id: tool.taskId,
+                    title,
+                    status: "complete" as const,
+                  }],
+                });
+
               // ── Special handling: Task (sub-agent) ──
-              if (tool.name === "Task") {
+              } else if (tool.name === "Task") {
                 const desc = parsedInput.description || parsedInput.subagent_type || "Sub-agent";
                 subAgentTasks.set(tool.toolUseId, { description: `Sub-agent: ${desc}`, taskId: tool.taskId });
                 log(channelId, `Sub-agent registered: toolUseId=${tool.toolUseId} desc="${desc}"`);
                 // Don't mark complete yet — it completes when the sub-agent finishes
                 // (we'll get a type=user tool_result for this toolUseId)
               } else if (HIDDEN_TOOLS.has(tool.name)) {
-                // Hidden tools (EnterPlanMode, ExitPlanMode, AskUserQuestion):
+                // Hidden tools (EnterPlanMode, ExitPlanMode):
                 // no task_update emitted on start, so nothing to complete.
                 // But update plan title on ExitPlanMode
                 if (tool.name === "ExitPlanMode" && displayMode === "plan") {
