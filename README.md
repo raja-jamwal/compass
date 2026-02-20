@@ -1,4 +1,4 @@
-# Claude-slacker
+# Compass
 
 A Slack app that connects Claude Code to your workspace. Every thread becomes a coding session — set a working directory, ask questions, and get answers with full access to your local filesystem. Claude runs on your machine, streams responses in real-time, and remembers context across messages.
 
@@ -141,8 +141,8 @@ Leave empty or unset to allow all users.
 ### 2. Configure environment
 
 ```bash
-mkdir -p ~/.claude-slacker
-cat > ~/.claude-slacker/.env << 'EOF'
+mkdir -p ~/.compass
+cat > ~/.compass/.env << 'EOF'
 SLACK_APP_TOKEN=xapp-1-...
 SLACK_BOT_TOKEN=xoxb-...
 ALLOWED_USERS=U096GJFBZ54
@@ -152,7 +152,7 @@ EOF
 ### 3. Run
 
 ```bash
-bunx claude-slacker
+bunx compass
 ```
 
 That's it. The bot connects via Socket Mode — no ngrok or public URL needed.
@@ -160,13 +160,13 @@ That's it. The bot connects via Socket Mode — no ngrok or public URL needed.
 You can also point to a specific env file:
 
 ```bash
-bunx claude-slacker --env-file /path/to/.env
+bunx compass --env-file /path/to/.env
 ```
 
 Or pass tokens directly as environment variables:
 
 ```bash
-SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... bunx claude-slacker
+SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... bunx compass
 ```
 
 #### Alternative: clone and run locally
@@ -174,8 +174,8 @@ SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... bunx claude-slacker
 If you prefer to run from source:
 
 ```bash
-git clone https://github.com/anthropics/claude-slacker.git
-cd claude-slacker
+git clone https://github.com/anthropics/compass.git
+cd compass
 cp .env.example .env   # edit with your tokens
 bun install
 bun start
@@ -187,7 +187,7 @@ When multiple sources provide the same variable, higher priority wins:
 
 1. Real environment variables (highest)
 2. `--env-file <path>`
-3. `~/.claude-slacker/.env`
+3. `~/.compass/.env`
 4. Local `.env` in the current directory (lowest)
 
 ### 4. Verify

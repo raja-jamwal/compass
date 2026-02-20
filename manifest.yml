@@ -1,5 +1,5 @@
 display_information:
-  name: Claude-slacker
+  name: Compass
   description: Bring Claude Code to your Slack workspace.
   background_color: "#2c2d30"
 features:
@@ -8,7 +8,7 @@ features:
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   bot_user:
-    display_name: claude-slacker
+    display_name: compass
     always_online: true
   slash_commands:
     - command: /cwd
