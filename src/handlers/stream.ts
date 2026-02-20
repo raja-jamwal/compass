@@ -163,45 +163,75 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
     return stopBtnPromise;
   }
 
-  // ── Streamer: created lazily to pick the right display mode ──
+  // ── Create timeline streamer eagerly for native "Thinking..." card ──
+  // If Claude enters plan mode (detected from the first content_block),
+  // we stop this stream, delete the message, and create a plan streamer.
   let streamer: any = null;
-  let displayMode: "plan" | "timeline" | null = null;
+  let displayMode: "plan" | "timeline" = "timeline";
   let streamerActive = false;
   let streamFailed = !cachedTeamId;
 
-  if (!cachedTeamId) {
-    log(channelId, `No cached team_id, using chat.update fallback`);
-  }
-
-  /**
-   * Create the chat streamer with the chosen display mode.
-   * Called once, on the first meaningful content event.
-   */
-  function initStreamer(mode: "plan" | "timeline") {
-    if (streamer) return; // already created
-    displayMode = mode;
+  if (cachedTeamId) {
     try {
       streamer = client.chatStream({
         channel: channelId,
         thread_ts: threadTs,
         recipient_team_id: cachedTeamId,
         recipient_user_id: userId,
-        task_display_mode: mode,
+        task_display_mode: "timeline",
       });
-      log(channelId, `Streamer created: task_display_mode=${mode}`);
+      log(channelId, `Streamer created: task_display_mode=timeline`);
     } catch (err: any) {
-      logErr(channelId, `Streamer creation failed (${mode}): ${err.message}`);
+      logErr(channelId, `Streamer creation failed: ${err.message}`);
+      streamFailed = true;
+    }
+  } else {
+    log(channelId, `No cached team_id, using chat.update fallback`);
+  }
+
+  /**
+   * Switch from the eager timeline streamer to a plan streamer.
+   * Stops the current stream, deletes its message, and creates a new one.
+   */
+  async function switchToPlanMode() {
+    if (!streamer || displayMode === "plan") return;
+    try {
+      // Finalize the timeline stream (contains only "Thinking..." card)
+      const stopResult = await streamer.stop();
+      const oldTs = stopResult?.ts;
+      log(channelId, `Timeline stream stopped for plan switch (ts=${oldTs})`);
+
+      // Delete the finalized timeline message (just had "Thinking...")
+      if (oldTs) {
+        await client.chat.delete({ channel: channelId, ts: oldTs }).catch(() => {});
+      }
+    } catch (err: any) {
+      logErr(channelId, `Failed to stop timeline stream for plan switch: ${err.message}`);
+    }
+
+    // Create fresh plan streamer
+    displayMode = "plan";
+    streamerActive = false;
+    try {
+      streamer = client.chatStream({
+        channel: channelId,
+        thread_ts: threadTs,
+        recipient_team_id: cachedTeamId,
+        recipient_user_id: userId,
+        task_display_mode: "plan",
+      });
+      log(channelId, `Plan streamer created: task_display_mode=plan`);
+    } catch (err: any) {
+      logErr(channelId, `Plan streamer creation failed: ${err.message}`);
       streamFailed = true;
     }
   }
 
   /**
-   * Ensure the streamer exists (defaults to timeline if not yet created),
-   * then append chunks/text. Handles the appendChain serialization.
+   * Append chunks/text to the active streamer with serialization.
    */
   function safeAppend(payload: any) {
-    if (streamFailed) return;
-    if (!streamer) initStreamer("timeline");
+    if (streamFailed || !streamer) return;
     appendChain = appendChain.then(async () => {
       if (!streamerActive) {
         streamerActive = true;
@@ -303,6 +333,26 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
 
   log(channelId, `Claude process started: pid=${proc.pid}, session=${sessionId}, resume=${isResume}, streaming=${!streamFailed}`);
 
+  // ── Show native "Thinking..." card immediately ──
+  if (!streamFailed) {
+    appendChain = appendChain.then(() => {
+      streamerActive = true;
+      log(channelId, `Streamer activated: initial "Thinking..." indicator`);
+      return streamer.append({
+        chunks: [{
+          type: "task_update",
+          id: "thinking",
+          title: "Thinking...",
+          status: "in_progress",
+        }],
+      });
+    }).catch((err: any) => {
+      logErr(channelId, `Initial stream start failed, using fallback: ${err.message}`);
+      streamerActive = false;
+      streamFailed = true;
+    });
+  }
+
   // Clear debug file for this run
   if (STREAM_DEBUG) {
     writeFileSync(STREAM_DEBUG_FILE, "");
@@ -378,34 +428,25 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
             const blockType = evt.content_block?.type;
             log(channelId, `stream: content_block_start index=${evt.index} type=${blockType}`);
 
-            // ── Plan mode detection on first content block ──
-            if (blockType === "tool_use" && evt.content_block.name === "EnterPlanMode" && !streamer) {
-              // First event is EnterPlanMode → create plan streamer
-              initStreamer("plan");
-              safeAppend({
-                chunks: [{
-                  type: "plan_update",
-                  title: "Planning...",
-                }],
+            // ── Plan mode: switch from timeline → plan streamer ──
+            if (blockType === "tool_use" && evt.content_block.name === "EnterPlanMode" && displayMode !== "plan") {
+              // Wait for any pending appends, then switch
+              appendChain = appendChain.then(() => switchToPlanMode()).then(() => {
+                safeAppend({
+                  chunks: [{ type: "plan_update", title: "Planning..." }],
+                });
               });
-              log(channelId, `Plan mode: created plan streamer with plan_update title`);
+              log(channelId, `Plan mode: switching to plan streamer`);
             }
 
-            // ── Ensure streamer exists for any content ──
-            if (!streamer && !streamFailed) {
-              initStreamer("timeline");
-            }
-
-            // ── Complete the initial "Thinking..." indicator ──
+            // ── Complete the "Thinking..." indicator ──
             if (!thinkingTaskDone && !streamFailed) {
               thinkingTaskDone = true;
               if (displayMode === "timeline") {
-                // In timeline: show thinking as a completed task
                 safeAppend({
                   chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" as const }],
                 });
               }
-              // In plan mode: no separate thinking indicator needed (plan_update serves that role)
             }
 
             // ── Track tool_use blocks for agentic visualization ──
@@ -453,19 +494,12 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
                 log(channelId, `stream: text_delta #${deltaCount}, accumulated=${accumulatedText.length} chars`);
               }
 
-              // Ensure streamer exists for text content
-              if (!streamer && !streamFailed) {
-                initStreamer("timeline");
-              }
-
-              // Complete thinking indicator if this is the first text
+              // Complete thinking indicator on first text
               if (!thinkingTaskDone && !streamFailed) {
                 thinkingTaskDone = true;
-                if (displayMode === "timeline") {
-                  safeAppend({
-                    chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" as const }],
-                  });
-                }
+                safeAppend({
+                  chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" as const }],
+                });
               }
 
               // Streaming path: use chatStream
@@ -815,7 +849,7 @@ export async function handleClaudeStream(opts: HandleClaudeStreamOpts): Promise<
         await appendChain;
 
         // Complete the thinking indicator if it never got resolved
-        if (!thinkingTaskDone && displayMode === "timeline") {
+        if (!thinkingTaskDone) {
           thinkingTaskDone = true;
           await streamer.append({
             chunks: [{ type: "task_update", id: "thinking", title: "Thinking", status: "complete" }],
