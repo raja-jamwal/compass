@@ -18,7 +18,7 @@ features:
   assistant_view:
     assistant_description: Claude Code agent — runs on your local machine with full filesystem access
     suggested_prompts:
-      - title: Set working directory
+      - title: Set $cwd working directory
         message: $cwd
       - title: Explain this codebase
         message: Give me a high-level overview of this project's architecture
