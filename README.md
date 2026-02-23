@@ -11,7 +11,7 @@ Bring workforce of Claude Codes to your Slack workspace. Every thread becomes an
 ## Quick start
 
 ```bash
-bunx compass
+bunx compass-agent
 ```
 
 That's it. The bot connects via Socket Mode — no servers, no ngrok, no cloud deployment. See [Setup](#setup) for first-time configuration.
@@ -128,19 +128,19 @@ EOF
 ### 3. Run
 
 ```bash
-bunx compass
+bunx compass-agent
 ```
 
 You can also point to a specific env file:
 
 ```bash
-bunx compass --env-file /path/to/.env
+bunx compass-agent --env-file /path/to/.env
 ```
 
 Or pass tokens directly:
 
 ```bash
-SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... bunx compass
+SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... bunx compass-agent
 ```
 
 #### Running from source
