@@ -667,11 +667,15 @@ async function processMessage({ channelId, threadTs, messageTs, userText, userId
 (async () => {
   log(null, `Claude CLI found: ${claudePath}`);
 
-  // Register MCP server (idempotent — overwrites if already exists)
+  // Register MCP server (remove first to ensure it points to latest)
   try {
     const mcpServerPath = path.join(import.meta.dir, "mcp", "server.ts");
     const mcpEnv: Record<string, string | undefined> = { ...process.env };
     delete mcpEnv.CLAUDECODE; // avoid nested-session check
+    const execOpts = { encoding: "utf-8" as const, timeout: 10000, env: mcpEnv as NodeJS.ProcessEnv, stdio: ["pipe", "pipe", "pipe"] as const };
+    try {
+      execFileSync(claudePath, ["mcp", "remove", "--scope", "user", "compass"], execOpts);
+    } catch {}
     execFileSync(claudePath, [
       "mcp", "add",
       "--transport", "stdio",
@@ -679,7 +683,7 @@ async function processMessage({ channelId, threadTs, messageTs, userText, userId
       "compass",
       "--",
       "bun", mcpServerPath,
-    ], { encoding: "utf-8", timeout: 10000, env: mcpEnv as NodeJS.ProcessEnv, stdio: ["pipe", "pipe", "pipe"] });
+    ], execOpts);
     log(null, `MCP server registered: compass -> ${mcpServerPath}`);
   } catch (err: any) {
     logErr(null, `Failed to register MCP server (non-fatal): ${err.message}`);
