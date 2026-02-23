@@ -8,562 +8,303 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            apple: {
+              blue: '#007AFF',
+              indigo: '#5856D6',
+              purple: '#AF52DE',
+              pink: '#FF2D55',
+              gray: {
+                50: '#F9FAFB',
+                100: '#F2F2F7',
+                200: '#E5E5EA',
+                300: '#D1D1D6',
+                400: '#AEAEB2',
+                500: '#8E8E93',
+                600: '#636366',
+                700: '#48484A',
+                800: '#2C2C2E',
+                900: '#1C1C1E',
+              }
+            }
+          }
+        }
+      }
+    }
+  </script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
-    :root {
-      --bg: #0a0a0f;
-      --bg-card: rgba(255, 255, 255, 0.03);
-      --bg-card-hover: rgba(255, 255, 255, 0.06);
-      --border: rgba(255, 255, 255, 0.08);
-      --border-hover: rgba(255, 255, 255, 0.15);
-      --text: #e4e4e7;
-      --text-muted: #71717a;
-      --text-dim: #52525b;
-      --accent: #a78bfa;
-      --accent-dim: rgba(167, 139, 250, 0.15);
-      --accent2: #818cf8;
-      --green: #34d399;
-      --orange: #fb923c;
-      --radius: 12px;
-      --max-width: 1100px;
+    .glass-nav {
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
     }
 
-    body {
-      font-family: 'Inter', -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
+    .hero-gradient {
+      background: linear-gradient(180deg, #f5f5f7 0%, #ffffff 100%);
     }
 
-    /* Gradient background */
-    body::before {
-      content: '';
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 100vh;
-      background:
-        radial-gradient(ellipse 80% 60% at 50% -20%, rgba(167, 139, 250, 0.12), transparent),
-        radial-gradient(ellipse 60% 40% at 80% 10%, rgba(129, 140, 248, 0.08), transparent);
-      pointer-events: none;
-      z-index: -1;
-    }
-
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-
-    .container { max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
-
-    /* ---- NAV ---- */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      padding: 16px 0;
-      background: rgba(10, 10, 15, 0.8);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
-    }
-    nav .container {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    nav .logo {
-      font-size: 1.2rem;
-      font-weight: 700;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    nav .links { display: flex; gap: 24px; align-items: center; }
-    nav .links a {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
-    nav .links a:hover { color: var(--text); text-decoration: none; }
-    nav .links .btn-nav {
-      background: var(--accent-dim);
-      color: var(--accent);
-      padding: 8px 16px;
-      border-radius: 8px;
-      font-weight: 600;
-      transition: background 0.2s;
-    }
-    nav .links .btn-nav:hover { background: rgba(167, 139, 250, 0.25); }
-
-    /* ---- HERO ---- */
-    .hero {
-      padding: 160px 0 80px;
-      text-align: center;
-    }
-    .hero .badges {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      margin-bottom: 32px;
-      flex-wrap: wrap;
-    }
-    .hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4rem);
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      margin-bottom: 20px;
-      background: linear-gradient(135deg, #fff 0%, #a78bfa 50%, #818cf8 100%);
+    .text-gradient {
+      background: linear-gradient(135deg, #007AFF 0%, #5856D6 50%, #AF52DE 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-    .hero p {
-      font-size: 1.2rem;
-      color: var(--text-muted);
-      max-width: 640px;
-      margin: 0 auto 40px;
-      line-height: 1.7;
-    }
-    .hero .cta-group {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
+
+    .card-glass {
+      background: rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
     }
 
-    /* Code block / install command */
-    .install-cmd {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 20px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.95rem;
-      color: var(--green);
-      cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
-    }
-    .install-cmd:hover {
-      border-color: var(--border-hover);
-      background: rgba(255, 255, 255, 0.07);
-    }
-    .install-cmd .dollar { color: var(--text-dim); user-select: none; }
-    .install-cmd .copy-icon { color: var(--text-dim); font-size: 0.85rem; }
-
-    .btn-primary {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--accent);
-      color: #0a0a0f;
-      padding: 14px 28px;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 0.95rem;
-      transition: opacity 0.2s;
-    }
-    .btn-primary:hover { opacity: 0.9; text-decoration: none; }
-
-    /* Hero screenshot */
-    .hero-screenshot {
-      margin-top: 60px;
-      position: relative;
-    }
-    .hero-screenshot img {
-      width: 100%;
-      max-width: 900px;
-      border-radius: 16px;
-      border: 1px solid var(--border);
-      box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5), 0 0 120px rgba(167, 139, 250, 0.06);
+    .screenshot-shadow {
+      box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.04),
+        0 8px 16px rgba(0, 0, 0, 0.06),
+        0 24px 48px rgba(0, 0, 0, 0.08);
     }
 
-    /* ---- SECTION ---- */
-    section { padding: 80px 0; }
-    .section-label {
-      font-size: 0.8rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--accent);
-      margin-bottom: 12px;
+    .feature-card-hover {
+      transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.3s ease;
     }
-    .section-title {
-      font-size: clamp(1.8rem, 4vw, 2.5rem);
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 16px;
-    }
-    .section-desc {
-      font-size: 1.1rem;
-      color: var(--text-muted);
-      max-width: 600px;
-      margin-bottom: 48px;
+    .feature-card-hover:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
     }
 
-    /* ---- HOW IT WORKS ---- */
-    .flow {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0;
-      flex-wrap: wrap;
-      margin: 48px 0;
-    }
-    .flow-step {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 28px;
-      text-align: center;
-      transition: border-color 0.2s, background 0.2s;
-    }
-    .flow-step:hover {
-      border-color: var(--border-hover);
-      background: var(--bg-card-hover);
-    }
-    .flow-step .icon { font-size: 1.8rem; margin-bottom: 8px; }
-    .flow-step .label { font-weight: 600; font-size: 0.95rem; }
-    .flow-step .desc { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
-    .flow-arrow {
-      color: var(--text-dim);
-      font-size: 1.4rem;
-      padding: 0 12px;
+    .flow-connector {
+      width: 40px;
+      height: 2px;
+      background: linear-gradient(90deg, #D1D1D6, #AEAEB2);
     }
 
-    /* ---- FEATURES GRID ---- */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 16px;
+    .install-box {
+      background: #1C1C1E;
+      transition: box-shadow 0.2s ease;
     }
-    .feature-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px;
-      transition: border-color 0.3s, background 0.3s, transform 0.3s;
-    }
-    .feature-card:hover {
-      border-color: var(--border-hover);
-      background: var(--bg-card-hover);
-      transform: translateY(-2px);
-    }
-    .feature-card .icon { font-size: 1.6rem; margin-bottom: 12px; }
-    .feature-card h3 {
-      font-size: 1.05rem;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .feature-card p {
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      line-height: 1.6;
-    }
-    .feature-card code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      background: rgba(167, 139, 250, 0.1);
-      color: var(--accent);
-      padding: 2px 6px;
-      border-radius: 4px;
+    .install-box:hover {
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
     }
 
-    /* ---- SCREENSHOTS ---- */
-    .screenshots-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 40px;
-    }
-    .screenshot-item {
-      display: flex;
-      align-items: center;
-      gap: 40px;
-    }
-    .screenshot-item:nth-child(even) { flex-direction: row-reverse; }
-    .screenshot-item img {
-      flex: 1;
-      max-width: 560px;
-      width: 100%;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-    }
-    .screenshot-text { flex: 1; }
-    .screenshot-text h3 {
-      font-size: 1.3rem;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-    .screenshot-text p {
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      line-height: 1.7;
+    .step-number {
+      background: linear-gradient(135deg, #007AFF, #5856D6);
     }
 
-    /* ---- SETUP ---- */
-    .setup-steps {
-      display: grid;
-      gap: 20px;
-      counter-reset: step;
+    .section-fade {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
     }
-    .setup-step {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px 28px 28px 72px;
-      position: relative;
-      counter-increment: step;
-    }
-    .setup-step::before {
-      content: counter(step);
-      position: absolute;
-      left: 24px;
-      top: 28px;
-      width: 32px;
-      height: 32px;
-      background: var(--accent-dim);
-      color: var(--accent);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 0.9rem;
-    }
-    .setup-step h3 {
-      font-size: 1.05rem;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .setup-step p {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      line-height: 1.6;
-    }
-    .setup-step pre {
-      margin-top: 12px;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px 18px;
-      overflow-x: auto;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      color: var(--green);
+    .section-fade.visible {
+      opacity: 1;
+      transform: translateY(0);
     }
 
-    /* ---- CONFIG TABLE ---- */
-    .config-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.9rem;
+    .config-row {
+      transition: background 0.15s ease;
     }
-    .config-table th {
-      text-align: left;
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
-      color: var(--text-muted);
-      font-weight: 600;
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .config-table td {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    .config-table tr:last-child td { border-bottom: none; }
-    .config-table code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      background: rgba(167, 139, 250, 0.1);
-      color: var(--accent);
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-    .config-table .required {
-      color: var(--orange);
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-    .config-table .optional {
-      color: var(--text-dim);
-      font-size: 0.75rem;
+    .config-row:hover {
+      background: #F9FAFB;
     }
 
-    /* ---- FOOTER ---- */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 40px 0;
-      text-align: center;
-      color: var(--text-dim);
-      font-size: 0.85rem;
-    }
-    footer .footer-links {
-      display: flex;
-      gap: 24px;
-      justify-content: center;
-      margin-bottom: 16px;
-    }
-    footer a { color: var(--text-muted); }
-    footer a:hover { color: var(--text); }
-
-    /* ---- RESPONSIVE ---- */
     @media (max-width: 768px) {
-      .hero { padding: 120px 0 60px; }
-      .flow-arrow { display: none; }
-      .flow { gap: 12px; }
-      .flow-step { flex: 1; min-width: 140px; padding: 14px 16px; }
-      .screenshot-item,
-      .screenshot-item:nth-child(even) {
-        flex-direction: column;
-      }
-      .screenshot-item img { max-width: 100%; }
-      .setup-step { padding-left: 64px; }
-      nav .links a:not(.btn-nav) { display: none; }
+      .flow-connector { display: none; }
+      .screenshot-row { flex-direction: column !important; }
     }
   </style>
 </head>
-<body>
+<body class="font-sans text-apple-gray-900 bg-white antialiased">
 
   <!-- Nav -->
-  <nav>
-    <div class="container">
-      <div class="logo">🧭 Compass</div>
-      <div class="links">
-        <a href="#features">Features</a>
-        <a href="#setup">Setup</a>
-        <a href="https://github.com/raja-jamwal/compass" class="btn-nav">GitHub</a>
+  <nav class="glass-nav fixed top-0 left-0 right-0 z-50 border-b border-apple-gray-200/60">
+    <div class="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between">
+      <a href="#" class="text-base font-semibold tracking-tight flex items-center gap-2 text-apple-gray-900 no-underline">
+        🧭 Compass
+      </a>
+      <div class="flex items-center gap-6">
+        <a href="#features" class="hidden sm:block text-sm text-apple-gray-600 hover:text-apple-gray-900 no-underline transition-colors">Features</a>
+        <a href="#screenshots" class="hidden sm:block text-sm text-apple-gray-600 hover:text-apple-gray-900 no-underline transition-colors">Screenshots</a>
+        <a href="#setup" class="hidden sm:block text-sm text-apple-gray-600 hover:text-apple-gray-900 no-underline transition-colors">Setup</a>
+        <a href="https://www.npmjs.com/package/compass-agent" class="hidden sm:block text-sm text-apple-gray-600 hover:text-apple-gray-900 no-underline transition-colors">npm</a>
+        <a href="https://github.com/raja-jamwal/compass" class="inline-flex items-center gap-1.5 text-sm font-medium text-white bg-apple-gray-900 hover:bg-apple-gray-800 px-4 py-1.5 rounded-full no-underline transition-colors">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
       </div>
     </div>
   </nav>
 
   <!-- Hero -->
-  <section class="hero">
-    <div class="container">
-      <div class="badges">
+  <section class="hero-gradient pt-32 pb-20 sm:pt-40 sm:pb-28">
+    <div class="max-w-4xl mx-auto px-6 text-center">
+      <div class="flex gap-2 justify-center mb-8 flex-wrap">
         <a href="https://github.com/raja-jamwal/compass/actions/workflows/test.yml"><img src="https://github.com/raja-jamwal/compass/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
+        <a href="https://github.com/raja-jamwal/compass/actions/workflows/publish.yml"><img src="https://github.com/raja-jamwal/compass/actions/workflows/publish.yml/badge.svg" alt="Publish"></a>
         <a href="https://www.npmjs.com/package/compass-agent"><img src="https://img.shields.io/npm/v/compass-agent" alt="npm version"></a>
       </div>
-      <h1>Bring Claude Code<br>to your Slack workspace</h1>
-      <p>Every thread becomes an isolated coding session — with its own working directory, git worktree, and full local filesystem access. Your whole team, working in parallel, zero conflicts.</p>
-      <div class="cta-group">
-        <div class="install-cmd" onclick="navigator.clipboard.writeText('bunx compass-agent')">
-          <span class="dollar">$</span> bunx compass-agent
-          <span class="copy-icon">📋</span>
+
+      <h1 class="text-5xl sm:text-7xl font-extrabold tracking-tight leading-[1.05] mb-6">
+        Bring Claude Code to<br>
+        <span class="text-gradient">your Slack workspace</span>
+      </h1>
+
+      <p class="text-lg sm:text-xl text-apple-gray-500 max-w-2xl mx-auto mb-10 leading-relaxed font-light">
+        Every thread becomes an isolated coding session — with its own working directory, git worktree, and full local filesystem access. Your whole team, working in parallel, zero conflicts.
+      </p>
+
+      <div class="flex flex-col sm:flex-row gap-3 justify-center items-center mb-16">
+        <div id="install-cmd" class="install-box rounded-xl px-5 py-3 flex items-center gap-3 cursor-pointer select-none">
+          <span class="text-apple-gray-500 font-mono text-sm select-none">$</span>
+          <span class="text-green-400 font-mono text-sm sm:text-base">bunx compass-agent</span>
+          <span id="copy-icon" class="text-apple-gray-500 text-xs ml-2 transition-all">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </span>
         </div>
-        <a href="https://github.com/raja-jamwal/compass" class="btn-primary">View on GitHub →</a>
+        <a href="https://github.com/raja-jamwal/compass" class="inline-flex items-center gap-2 bg-apple-blue hover:bg-blue-600 text-white font-semibold text-sm px-7 py-3 rounded-full no-underline transition-colors shadow-lg shadow-blue-500/20">
+          View on GitHub
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14m-7-7l7 7-7 7"/></svg>
+        </a>
       </div>
-      <div class="hero-screenshot">
-        <img src="assets/sub-agent.png" alt="Compass running sub-agents in Slack">
+
+      <div class="relative max-w-4xl mx-auto">
+        <div class="absolute -inset-4 bg-gradient-to-b from-apple-blue/5 to-apple-purple/5 rounded-3xl blur-2xl"></div>
+        <img src="assets/sub-agent.png" alt="Compass running sub-agents in Slack" class="relative w-full rounded-2xl border border-apple-gray-200 screenshot-shadow">
       </div>
     </div>
   </section>
 
   <!-- How it works -->
-  <section id="how-it-works">
-    <div class="container">
-      <div class="section-label">How it works</div>
-      <div class="section-title">Local-first, zero infrastructure</div>
-      <div class="section-desc">Compass runs on your machine using Slack's Socket Mode. No servers, no ngrok, no cloud deployment.</div>
-      <div class="flow">
-        <div class="flow-step">
-          <div class="icon">💬</div>
-          <div class="label">Slack Thread</div>
-          <div class="desc">You send a message</div>
+  <section id="how-it-works" class="py-24 bg-white section-fade">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-apple-blue uppercase tracking-wider mb-3">How it works</p>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">Local-first, zero infrastructure</h2>
+        <p class="text-lg text-apple-gray-500 max-w-xl mx-auto font-light">Runs on your machine using Slack's Socket Mode. No servers to deploy, no URLs to expose.</p>
+      </div>
+
+      <div class="flex items-center justify-center flex-wrap gap-4">
+        <div class="card-glass border border-apple-gray-200 rounded-2xl p-6 text-center min-w-[150px] feature-card-hover">
+          <div class="text-3xl mb-2">💬</div>
+          <div class="font-semibold text-sm">Slack Thread</div>
+          <div class="text-xs text-apple-gray-500 mt-1">You send a message</div>
         </div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step">
-          <div class="icon">🔌</div>
-          <div class="label">Socket Mode</div>
-          <div class="desc">Bot receives it locally</div>
+        <div class="flow-connector hidden sm:block"></div>
+        <div class="card-glass border border-apple-gray-200 rounded-2xl p-6 text-center min-w-[150px] feature-card-hover">
+          <div class="text-3xl mb-2">🔌</div>
+          <div class="font-semibold text-sm">Socket Mode</div>
+          <div class="text-xs text-apple-gray-500 mt-1">Bot receives locally</div>
         </div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step">
-          <div class="icon">🤖</div>
-          <div class="label">Claude CLI</div>
-          <div class="desc">Spawns a session</div>
+        <div class="flow-connector hidden sm:block"></div>
+        <div class="card-glass border border-apple-gray-200 rounded-2xl p-6 text-center min-w-[150px] feature-card-hover">
+          <div class="text-3xl mb-2">🤖</div>
+          <div class="font-semibold text-sm">Claude CLI</div>
+          <div class="text-xs text-apple-gray-500 mt-1">Spawns a session</div>
         </div>
-        <div class="flow-arrow">→</div>
-        <div class="flow-step">
-          <div class="icon">📂</div>
-          <div class="label">Filesystem</div>
-          <div class="desc">Reads &amp; writes files</div>
+        <div class="flow-connector hidden sm:block"></div>
+        <div class="card-glass border border-apple-gray-200 rounded-2xl p-6 text-center min-w-[150px] feature-card-hover">
+          <div class="text-3xl mb-2">📂</div>
+          <div class="font-semibold text-sm">Filesystem</div>
+          <div class="text-xs text-apple-gray-500 mt-1">Reads & writes files</div>
         </div>
       </div>
     </div>
   </section>
 
   <!-- Features -->
-  <section id="features">
-    <div class="container">
-      <div class="section-label">Features</div>
-      <div class="section-title">Everything your team needs</div>
-      <div class="section-desc">Built for real development workflows — not demos.</div>
-      <div class="features-grid">
-        <div class="feature-card">
-          <div class="icon">🧵</div>
-          <h3>Per-thread sessions</h3>
-          <p>Every thread is an independent Claude session. Follow-up messages resume the conversation with full context using <code>--resume</code>.</p>
+  <section id="features" class="py-24 bg-apple-gray-50 section-fade">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-apple-indigo uppercase tracking-wider mb-3">Features</p>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">Everything your team needs</h2>
+        <p class="text-lg text-apple-gray-500 max-w-xl mx-auto font-light">Built for real development workflows, not demos.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 feature-card-hover">
+          <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xl mb-4">🧵</div>
+          <h3 class="text-base font-semibold mb-2">Per-thread sessions</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">Every thread is an independent Claude session. Follow-up messages resume with full context using <code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">--resume</code>.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">📁</div>
-          <h3><code>$cwd</code> — Working directory</h3>
-          <p>Set the directory Claude works in. Interactive picker remembers recent directories, or set it directly with a path.</p>
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 feature-card-hover">
+          <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-xl mb-4">📁</div>
+          <h3 class="text-base font-semibold mb-2"><code class="text-sm bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">$cwd</code> Working directory</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">Set the directory Claude works in. Interactive picker remembers recent directories, or set directly with a path.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">🎓</div>
-          <h3><code>$teach</code> — Team knowledge</h3>
-          <p>Store conventions that get injected into every session. "Use TypeScript", "Always write tests" — shared across your workspace.</p>
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 feature-card-hover">
+          <div class="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-xl mb-4">🎓</div>
+          <h3 class="text-base font-semibold mb-2"><code class="text-sm bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">$teach</code> Team knowledge</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">Store conventions injected into every session. "Use TypeScript", "Always write tests" — shared across your workspace.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">⚡</div>
-          <h3>Streaming responses</h3>
-          <p>Token-by-token streaming via Slack's native <code>chatStream</code> API. Tool calls render as an agentic timeline with live progress.</p>
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 feature-card-hover">
+          <div class="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-xl mb-4">⚡</div>
+          <h3 class="text-base font-semibold mb-2">Streaming responses</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">Token-by-token streaming via Slack's native <code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">chatStream</code> API. Tool calls render as a live agentic timeline.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">🌳</div>
-          <h3>Git worktree isolation</h3>
-          <p>Each thread gets its own worktree and branch. Parallel sessions make code changes without conflicts. Auto-cleanup after 24 hours.</p>
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 feature-card-hover">
+          <div class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center text-xl mb-4">🌳</div>
+          <h3 class="text-base font-semibold mb-2">Git worktree isolation</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">Each thread gets its own worktree and branch. Parallel sessions make code changes without conflicts. Auto-cleanup after 24h.</p>
         </div>
-        <div class="feature-card">
-          <div class="icon">📊</div>
-          <h3>Dashboard &amp; usage tracking</h3>
-          <p>App Home shows live stats, recent sessions, cost tracking per invocation. Stop button on every response. User whitelist support.</p>
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 feature-card-hover">
+          <div class="w-10 h-10 rounded-xl bg-pink-50 flex items-center justify-center text-xl mb-4">📊</div>
+          <h3 class="text-base font-semibold mb-2">Dashboard & usage tracking</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">App Home shows live stats, recent sessions, cost tracking per invocation. Stop button on every response.</p>
         </div>
       </div>
     </div>
   </section>
 
   <!-- Screenshots -->
-  <section id="screenshots">
-    <div class="container">
-      <div class="section-label">In action</div>
-      <div class="section-title">See it working</div>
-      <div class="section-desc"></div>
-      <div class="screenshots-grid">
-        <div class="screenshot-item">
-          <img src="assets/streaming-feedback.png" alt="Working directory set in Slack channel">
-          <div class="screenshot-text">
-            <h3>Set a working directory, start coding</h3>
-            <p>Point Claude at any project on your machine. The working directory is stored per-thread, so each conversation is scoped to its own codebase.</p>
+  <section id="screenshots" class="py-24 bg-white section-fade">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-apple-purple uppercase tracking-wider mb-3">In action</p>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">See it working</h2>
+      </div>
+
+      <div class="space-y-24">
+        <div class="flex flex-col md:flex-row items-center gap-12 screenshot-row">
+          <div class="flex-1">
+            <div class="relative">
+              <div class="absolute -inset-3 bg-gradient-to-br from-blue-100/40 to-indigo-100/40 rounded-3xl blur-xl"></div>
+              <img src="assets/streaming-feedback.png" alt="Working directory set in Slack" class="relative w-full rounded-2xl border border-apple-gray-200 screenshot-shadow">
+            </div>
+          </div>
+          <div class="flex-1 max-w-md">
+            <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xl mb-4">📁</div>
+            <h3 class="text-2xl font-bold mb-3 tracking-tight">Set a directory, start coding</h3>
+            <p class="text-apple-gray-500 leading-relaxed">Point Claude at any project on your machine. The working directory is stored per-thread, so each conversation is scoped to its own codebase.</p>
           </div>
         </div>
-        <div class="screenshot-item">
-          <img src="assets/planning-streaming.png" alt="Streaming response with planning and sub-agents">
-          <div class="screenshot-text">
-            <h3>Agentic tool timeline</h3>
-            <p>Watch Claude think, plan, and execute in real-time. Every tool call — file reads, edits, shell commands, sub-agents — renders as a live progress step.</p>
+
+        <div class="flex flex-col md:flex-row-reverse items-center gap-12 screenshot-row">
+          <div class="flex-1">
+            <div class="relative">
+              <div class="absolute -inset-3 bg-gradient-to-br from-purple-100/40 to-pink-100/40 rounded-3xl blur-xl"></div>
+              <img src="assets/planning-streaming.png" alt="Streaming with planning and sub-agents" class="relative w-full rounded-2xl border border-apple-gray-200 screenshot-shadow">
+            </div>
+          </div>
+          <div class="flex-1 max-w-md">
+            <div class="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-xl mb-4">⚡</div>
+            <h3 class="text-2xl font-bold mb-3 tracking-tight">Agentic tool timeline</h3>
+            <p class="text-apple-gray-500 leading-relaxed">Watch Claude think, plan, and execute in real-time. Every tool call — file reads, edits, shell commands, sub-agents — renders as a live progress step.</p>
           </div>
         </div>
       </div>
@@ -571,99 +312,151 @@
   </section>
 
   <!-- Setup -->
-  <section id="setup">
-    <div class="container">
-      <div class="section-label">Get started</div>
-      <div class="section-title">Up and running in 5 minutes</div>
-      <div class="section-desc"></div>
-      <div class="setup-steps">
-        <div class="setup-step">
-          <h3>Create the Slack app</h3>
-          <p>Go to <a href="https://api.slack.com/apps">api.slack.com/apps</a>, create from manifest using the included <code>manifest.yml</code>, and install to your workspace. Grab the App-Level Token and Bot Token.</p>
+  <section id="setup" class="py-24 bg-apple-gray-50 section-fade">
+    <div class="max-w-3xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-apple-blue uppercase tracking-wider mb-3">Get started</p>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">Up and running in 5 minutes</h2>
+        <p class="text-lg text-apple-gray-500 max-w-xl mx-auto font-light">Prerequisites: <a href="https://bun.sh" class="text-apple-blue hover:underline">Bun</a>, <a href="https://docs.anthropic.com/en/docs/claude-code" class="text-apple-blue hover:underline">Claude CLI</a>, and a Slack workspace.</p>
+      </div>
+
+      <div class="space-y-4">
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 pl-20 relative feature-card-hover">
+          <div class="step-number absolute left-6 top-7 w-9 h-9 rounded-xl text-white flex items-center justify-center font-bold text-sm">1</div>
+          <h3 class="text-base font-semibold mb-2">Create the Slack app</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">Go to <a href="https://api.slack.com/apps" class="text-apple-blue hover:underline">api.slack.com/apps</a>, create from manifest using the included <code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">manifest.yml</code>, and install to your workspace.</p>
         </div>
-        <div class="setup-step">
-          <h3>Configure environment</h3>
-          <p>Store your tokens in <code>~/.compass/.env</code>:</p>
-          <pre>mkdir -p ~/.compass
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 pl-20 relative feature-card-hover">
+          <div class="step-number absolute left-6 top-7 w-9 h-9 rounded-xl text-white flex items-center justify-center font-bold text-sm">2</div>
+          <h3 class="text-base font-semibold mb-2">Configure environment</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed mb-3">Store your tokens in <code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">~/.compass/.env</code></p>
+          <div class="bg-apple-gray-900 rounded-xl p-4 overflow-x-auto">
+            <pre class="text-sm font-mono text-green-400 leading-relaxed">mkdir -p ~/.compass
 cat > ~/.compass/.env &lt;&lt; 'EOF'
 SLACK_APP_TOKEN=xapp-1-...
 SLACK_BOT_TOKEN=xoxb-...
 EOF</pre>
+          </div>
         </div>
-        <div class="setup-step">
-          <h3>Run</h3>
-          <p>One command. No servers, no ngrok.</p>
-          <pre>bunx compass-agent</pre>
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 pl-20 relative feature-card-hover">
+          <div class="step-number absolute left-6 top-7 w-9 h-9 rounded-xl text-white flex items-center justify-center font-bold text-sm">3</div>
+          <h3 class="text-base font-semibold mb-2">Run</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed mb-3">One command. No servers, no ngrok.</p>
+          <div class="bg-apple-gray-900 rounded-xl p-4">
+            <pre class="text-sm font-mono text-green-400">bunx compass-agent</pre>
+          </div>
         </div>
-        <div class="setup-step">
-          <h3>Verify</h3>
-          <p>Open the app in Slack, go to the Home tab to see the dashboard, start a thread, set <code>$cwd</code>, and send a question.</p>
+
+        <div class="bg-white border border-apple-gray-200 rounded-2xl p-7 pl-20 relative feature-card-hover">
+          <div class="step-number absolute left-6 top-7 w-9 h-9 rounded-xl text-white flex items-center justify-center font-bold text-sm">4</div>
+          <h3 class="text-base font-semibold mb-2">Verify</h3>
+          <p class="text-sm text-apple-gray-500 leading-relaxed">Open the app in Slack, go to the Home tab, start a thread, set <code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">$cwd</code>, and ask a question.</p>
         </div>
       </div>
     </div>
   </section>
 
   <!-- Configuration -->
-  <section id="config">
-    <div class="container">
-      <div class="section-label">Configuration</div>
-      <div class="section-title">Environment variables</div>
-      <div class="section-desc"></div>
-      <table class="config-table">
-        <thead>
-          <tr>
-            <th>Variable</th>
-            <th></th>
-            <th>Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><code>SLACK_APP_TOKEN</code></td>
-            <td><span class="required">Required</span></td>
-            <td>App-level token (<code>xapp-...</code>) for Socket Mode</td>
-          </tr>
-          <tr>
-            <td><code>SLACK_BOT_TOKEN</code></td>
-            <td><span class="required">Required</span></td>
-            <td>Bot user OAuth token (<code>xoxb-...</code>)</td>
-          </tr>
-          <tr>
-            <td><code>ALLOWED_USERS</code></td>
-            <td><span class="optional">Optional</span></td>
-            <td>Comma-separated Slack user IDs to whitelist</td>
-          </tr>
-          <tr>
-            <td><code>CLAUDE_PATH</code></td>
-            <td><span class="optional">Optional</span></td>
-            <td>Path to the <code>claude</code> binary (defaults to <code>claude</code> in PATH)</td>
-          </tr>
-          <tr>
-            <td><code>CLAUDE_ADDITIONAL_ARGS</code></td>
-            <td><span class="optional">Optional</span></td>
-            <td>Extra CLI args appended to every <code>claude</code> invocation</td>
-          </tr>
-          <tr>
-            <td><code>ENV_*</code></td>
-            <td><span class="optional">Optional</span></td>
-            <td>Variables prefixed with <code>ENV_</code> are injected into Claude's environment</td>
-          </tr>
-        </tbody>
-      </table>
+  <section id="config" class="py-24 bg-white section-fade">
+    <div class="max-w-3xl mx-auto px-6">
+      <div class="text-center mb-16">
+        <p class="text-sm font-semibold text-apple-blue uppercase tracking-wider mb-3">Configuration</p>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">Environment variables</h2>
+      </div>
+
+      <div class="bg-white border border-apple-gray-200 rounded-2xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-apple-gray-200 bg-apple-gray-50">
+              <th class="text-left px-6 py-3 text-xs font-semibold text-apple-gray-500 uppercase tracking-wider">Variable</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-apple-gray-500 uppercase tracking-wider w-20"></th>
+              <th class="text-left px-6 py-3 text-xs font-semibold text-apple-gray-500 uppercase tracking-wider">Description</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-apple-gray-100">
+            <tr class="config-row">
+              <td class="px-6 py-4"><code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">SLACK_APP_TOKEN</code></td>
+              <td class="px-4 py-4"><span class="text-xs font-semibold text-orange-500">Required</span></td>
+              <td class="px-6 py-4 text-apple-gray-500">App-level token for Socket Mode</td>
+            </tr>
+            <tr class="config-row">
+              <td class="px-6 py-4"><code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">SLACK_BOT_TOKEN</code></td>
+              <td class="px-4 py-4"><span class="text-xs font-semibold text-orange-500">Required</span></td>
+              <td class="px-6 py-4 text-apple-gray-500">Bot user OAuth token</td>
+            </tr>
+            <tr class="config-row">
+              <td class="px-6 py-4"><code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">ALLOWED_USERS</code></td>
+              <td class="px-4 py-4"><span class="text-xs text-apple-gray-400">Optional</span></td>
+              <td class="px-6 py-4 text-apple-gray-500">Comma-separated Slack user IDs to whitelist</td>
+            </tr>
+            <tr class="config-row">
+              <td class="px-6 py-4"><code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">CLAUDE_PATH</code></td>
+              <td class="px-4 py-4"><span class="text-xs text-apple-gray-400">Optional</span></td>
+              <td class="px-6 py-4 text-apple-gray-500">Path to <code class="text-xs bg-apple-gray-100 text-apple-indigo px-1 rounded font-mono">claude</code> binary</td>
+            </tr>
+            <tr class="config-row">
+              <td class="px-6 py-4"><code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">CLAUDE_ADDITIONAL_ARGS</code></td>
+              <td class="px-4 py-4"><span class="text-xs text-apple-gray-400">Optional</span></td>
+              <td class="px-6 py-4 text-apple-gray-500">Extra CLI args for every invocation</td>
+            </tr>
+            <tr class="config-row">
+              <td class="px-6 py-4"><code class="text-xs bg-apple-gray-100 text-apple-indigo px-1.5 py-0.5 rounded font-mono">ENV_*</code></td>
+              <td class="px-4 py-4"><span class="text-xs text-apple-gray-400">Optional</span></td>
+              <td class="px-6 py-4 text-apple-gray-500">Injected into Claude's environment (e.g. <code class="text-xs bg-apple-gray-100 text-apple-indigo px-1 rounded font-mono">ENV_ANTHROPIC_API_KEY</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </section>
 
   <!-- Footer -->
-  <footer>
-    <div class="container">
-      <div class="footer-links">
-        <a href="https://github.com/raja-jamwal/compass">GitHub</a>
-        <a href="https://www.npmjs.com/package/compass-agent">npm</a>
-        <a href="https://github.com/raja-jamwal/compass/issues">Issues</a>
+  <footer class="border-t border-apple-gray-200 py-12 bg-apple-gray-50">
+    <div class="max-w-5xl mx-auto px-6 text-center">
+      <div class="flex gap-8 justify-center mb-6">
+        <a href="https://github.com/raja-jamwal/compass" class="text-sm text-apple-gray-500 hover:text-apple-gray-900 no-underline transition-colors">GitHub</a>
+        <a href="https://www.npmjs.com/package/compass-agent" class="text-sm text-apple-gray-500 hover:text-apple-gray-900 no-underline transition-colors">npm</a>
+        <a href="https://github.com/raja-jamwal/compass/issues" class="text-sm text-apple-gray-500 hover:text-apple-gray-900 no-underline transition-colors">Issues</a>
       </div>
-      <p>MIT License</p>
+      <p class="text-sm text-apple-gray-400">MIT License</p>
     </div>
   </footer>
+
+  <script>
+    // Copy install command
+    $('#install-cmd').on('click', function() {
+      navigator.clipboard.writeText('bunx compass-agent');
+      const $icon = $('#copy-icon');
+      $icon.html('<svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>');
+      setTimeout(() => {
+        $icon.html('<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>');
+      }, 2000);
+    });
+
+    // Smooth scroll
+    $('a[href^="#"]').on('click', function(e) {
+      e.preventDefault();
+      const target = $($(this).attr('href'));
+      if (target.length) {
+        $('html, body').animate({ scrollTop: target.offset().top - 48 }, 500);
+      }
+    });
+
+    // Scroll fade-in
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1 });
+
+    $('.section-fade').each(function() {
+      observer.observe(this);
+    });
+  </script>
 
 </body>
 </html>
