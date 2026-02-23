@@ -2,7 +2,6 @@
 auth.txt
 sessions.db*
 trees/
-assets/
 .git/
 .claude/
 CLAUDE.md
