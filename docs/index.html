@@ -164,7 +164,14 @@
       animation: thinking-fade 2.5s ease-in-out;
     }
 
-    /* Slack thread animation */
+    /* Card deck */
+    .deck-container {
+      position: relative;
+      width: 100%;
+      max-width: 520px;
+      margin: 0 auto;
+      height: 380px;
+    }
     .slack-thread {
       background: #fff;
       border: 1px solid #e5e5ea;
@@ -173,6 +180,42 @@
       font-family: 'Inter', -apple-system, sans-serif;
       width: 100%;
       overflow: hidden;
+      position: absolute;
+      top: 0;
+      left: 0;
+      transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.6s ease, box-shadow 0.6s ease;
+      transform-origin: center top;
+    }
+    .slack-thread[data-deck="0"] {
+      z-index: 4;
+      transform: translateY(0) scale(1);
+      opacity: 1;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+    }
+    .slack-thread[data-deck="1"] {
+      z-index: 3;
+      transform: translateY(12px) scale(0.96);
+      opacity: 0.7;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+    .slack-thread[data-deck="2"] {
+      z-index: 2;
+      transform: translateY(24px) scale(0.92);
+      opacity: 0.45;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+    }
+    .slack-thread[data-deck="3"] {
+      z-index: 1;
+      transform: translateY(36px) scale(0.88);
+      opacity: 0.25;
+      box-shadow: none;
+    }
+    /* Exit animation: front card flies up and fades out */
+    .slack-thread.deck-exit {
+      transform: translateY(-30px) scale(0.95) !important;
+      opacity: 0 !important;
+      z-index: 5 !important;
+      transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.45s ease;
     }
     .slack-thread-bar {
       display: flex;
@@ -338,7 +381,8 @@
     @media (max-width: 768px) {
       .flow-connector { display: none; }
       .screenshot-row { flex-direction: column !important; }
-      .slack-thread { width: 100%; }
+      .deck-container { height: 340px; }
+      .slack-thread { padding: 12px 14px; }
     }
   </style>
 </head>
@@ -358,6 +402,10 @@
         <a href="https://github.com/raja-jamwal/compass" class="inline-flex items-center gap-1.5 text-sm font-medium text-white bg-apple-gray-900 hover:bg-apple-gray-800 px-4 py-1.5 rounded-full no-underline transition-colors">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
           GitHub
+        </a>
+        <a href="https://www.linkedin.com/in/rajajamwal/" class="inline-flex items-center gap-1.5 text-sm font-medium text-white bg-[#0A66C2] hover:bg-[#004182] px-4 py-1.5 rounded-full no-underline transition-colors">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+          LinkedIn
         </a>
       </div>
     </div>
@@ -417,7 +465,7 @@
 
       <div class="relative max-w-5xl mx-auto">
         <div class="absolute -inset-4 bg-gradient-to-b from-apple-blue/5 to-apple-purple/5 rounded-3xl blur-2xl"></div>
-        <div class="relative grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="relative deck-container" id="hero-deck">
 
           <!-- Thread 1: Sub-agent execution -->
           <div class="slack-thread screenshot-shadow" id="anim-thread-1">
@@ -521,6 +569,122 @@
                 <div class="sl-step-detail" data-delay="5600">
                   Reading: db.ts<br>
                   Searching: {getSession|queryCache}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Thread 3: Legal domain -->
+          <div class="slack-thread screenshot-shadow" id="anim-thread-3">
+            <div class="slack-thread-bar">
+              # legal-ops <span>Thread</span>
+            </div>
+
+            <div class="sl-row" data-delay="300">
+              <div class="sl-avatar-placeholder" style="background:#C9A0DC">R</div>
+              <div class="sl-content">
+                <div class="sl-meta"><span class="sl-name">Rachel</span> <span class="sl-time">9:10 AM</span></div>
+                <div class="sl-text">We need to review the new EU AI Act compliance requirements before the board meeting</div>
+              </div>
+            </div>
+
+            <div class="sl-row" data-delay="1400">
+              <div class="sl-avatar-placeholder" style="background:#F0C987">D</div>
+              <div class="sl-content">
+                <div class="sl-meta"><span class="sl-name">David</span> <span class="sl-time">9:11 AM</span></div>
+                <div class="sl-text"><span class="sl-mention">@compass</span> research EU AI Act obligations for our SaaS platform, cross-reference with our internal compliance docs and draft a gap analysis</div>
+              </div>
+            </div>
+
+            <div class="sl-row" data-delay="2600">
+              <img src="assets/compass-icon.png" alt="" class="sl-avatar">
+              <div class="sl-content">
+                <div class="sl-meta"><span class="sl-name">compass</span> <span class="sl-badge">App</span> <span class="sl-time">9:11 AM</span></div>
+                <div class="sl-text">I'll research the regulatory requirements and cross-reference with your internal policies.</div>
+                <div class="sl-step" data-delay="3200" data-complete="4200">
+                  <svg class="sl-step-check" style="display:none" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                  <div class="sl-spinner"></div>
+                  <span class="sl-step-text">Planning...</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </div>
+                <div class="sl-step" data-delay="4400">
+                  <div class="sl-spinner"></div>
+                  <span class="sl-step-text">Web search: EU AI Act SaaS obligations 2026</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </div>
+                <div class="sl-step" data-delay="5000">
+                  <span class="sl-step-star">*</span>
+                  <span class="sl-step-text">Sub-agent: Search internal KB for compliance</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </div>
+                <div class="sl-step-detail" data-delay="5500">
+                  Reading: policies/ai-governance.md<br>
+                  Reading: policies/data-processing.md
+                </div>
+                <div class="sl-step" data-delay="5800">
+                  <div class="sl-spinner"></div>
+                  <span class="sl-step-text">Sub-agent: Draft gap analysis report</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Thread 4: Equity research -->
+          <div class="slack-thread screenshot-shadow" id="anim-thread-4">
+            <div class="slack-thread-bar">
+              # equity-research <span>Thread</span>
+            </div>
+
+            <div class="sl-row" data-delay="500">
+              <div class="sl-avatar-placeholder" style="background:#87CEEB">P</div>
+              <div class="sl-content">
+                <div class="sl-meta"><span class="sl-name">Priya</span> <span class="sl-time">3:30 PM</span></div>
+                <div class="sl-text">We need a deep dive on NVDA before the earnings call next week</div>
+              </div>
+            </div>
+
+            <div class="sl-row" data-delay="1700">
+              <div class="sl-avatar-placeholder" style="background:#98D4BB">T</div>
+              <div class="sl-content">
+                <div class="sl-meta"><span class="sl-name">Tom</span> <span class="sl-time">3:31 PM</span></div>
+                <div class="sl-text"><span class="sl-mention">@compass</span> run a full equity analysis on NVDA — PESTEL, fundamentals, competitive moat. Pull latest filings and macro data.</div>
+              </div>
+            </div>
+
+            <div class="sl-row" data-delay="2900">
+              <img src="assets/compass-icon.png" alt="" class="sl-avatar">
+              <div class="sl-content">
+                <div class="sl-meta"><span class="sl-name">compass</span> <span class="sl-badge">App</span> <span class="sl-time">3:31 PM</span></div>
+                <div class="sl-text">I'll run a comprehensive analysis across macro, fundamentals, and competitive positioning.</div>
+                <div class="sl-step" data-delay="3500" data-complete="4500">
+                  <svg class="sl-step-check" style="display:none" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                  <div class="sl-spinner"></div>
+                  <span class="sl-step-text">Planning...</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </div>
+                <div class="sl-step" data-delay="4700">
+                  <span class="sl-step-star">*</span>
+                  <span class="sl-step-text">Sub-agent: PESTEL macro analysis</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </div>
+                <div class="sl-step-detail" data-delay="5200">
+                  Web search: NVDA regulatory export controls<br>
+                  Web search: semiconductor industry outlook 2026
+                </div>
+                <div class="sl-step" data-delay="5400">
+                  <span class="sl-step-star">*</span>
+                  <span class="sl-step-text">Sub-agent: Fundamental analysis &amp; DCF</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+                </div>
+                <div class="sl-step-detail" data-delay="5900">
+                  Reading: SEC 10-K filing, revenue segments<br>
+                  Calculating: FCF yield, P/E vs peers
+                </div>
+                <div class="sl-step" data-delay="6100">
+                  <div class="sl-spinner"></div>
+                  <span class="sl-step-text">Sub-agent: Competitive moat assessment</span>
+                  <svg class="sl-chevron" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
                 </div>
               </div>
             </div>
@@ -803,60 +967,91 @@ EOF</pre>
       observer.observe(this);
     });
 
-    // Slack thread animation
-    function animateThread(container) {
-      var rows = container.querySelectorAll('.sl-row');
-      var steps = container.querySelectorAll('.sl-step');
-      var details = container.querySelectorAll('.sl-step-detail');
-      var totalDuration = 0;
+    // Card deck + step animation
+    (function() {
+      var deck = document.getElementById('hero-deck');
+      var cards = Array.from(deck.querySelectorAll('.slack-thread'));
+      var order = cards.map(function(_, i) { return i; }); // [0,1,2,3]
+      var CARD_DISPLAY_TIME = 7000; // ms each card is on top
+      var animTimers = [];
 
-      rows.forEach(function(row) {
-        var delay = parseInt(row.dataset.delay || '0', 10);
-        setTimeout(function() { row.classList.add('visible'); }, delay);
-        totalDuration = Math.max(totalDuration, delay + 350);
-      });
+      function assignPositions() {
+        cards.forEach(function(card, i) {
+          var pos = order.indexOf(i);
+          card.setAttribute('data-deck', pos);
+          card.classList.remove('deck-exit');
+        });
+      }
 
-      steps.forEach(function(step) {
-        var delay = parseInt(step.dataset.delay || '0', 10);
-        var completeAt = step.dataset.complete ? parseInt(step.dataset.complete, 10) : 0;
-        setTimeout(function() { step.classList.add('visible'); }, delay);
-        totalDuration = Math.max(totalDuration, delay + 350);
-        if (completeAt) {
-          setTimeout(function() {
-            var spinner = step.querySelector('.sl-spinner');
-            var check = step.querySelector('.sl-step-check');
-            if (spinner) spinner.style.display = 'none';
-            if (check) check.style.display = 'block';
-          }, completeAt);
-          totalDuration = Math.max(totalDuration, completeAt);
-        }
-      });
-
-      details.forEach(function(d) {
-        var delay = parseInt(d.dataset.delay || '0', 10);
-        setTimeout(function() { d.classList.add('visible'); }, delay);
-        totalDuration = Math.max(totalDuration, delay + 400);
-      });
-
-      // Loop: reset and replay
-      setTimeout(function() {
-        rows.forEach(function(r) { r.classList.remove('visible'); });
-        steps.forEach(function(s) {
+      function resetCard(card) {
+        card.querySelectorAll('.sl-row').forEach(function(r) { r.classList.remove('visible'); });
+        card.querySelectorAll('.sl-step').forEach(function(s) {
           s.classList.remove('visible');
           var spinner = s.querySelector('.sl-spinner');
           var check = s.querySelector('.sl-step-check');
           if (spinner) spinner.style.display = '';
           if (check) check.style.display = 'none';
         });
-        details.forEach(function(d) { d.classList.remove('visible'); });
-        setTimeout(function() { animateThread(container); }, 800);
-      }, totalDuration + 3500);
-    }
+        card.querySelectorAll('.sl-step-detail').forEach(function(d) { d.classList.remove('visible'); });
+      }
 
-    // Start hero thread animations on load
-    document.querySelectorAll('.slack-thread').forEach(function(el) {
-      animateThread(el);
-    });
+      function animateCard(card) {
+        // Clear any pending timers
+        card.querySelectorAll('.sl-row').forEach(function(row) {
+          var delay = parseInt(row.dataset.delay || '0', 10);
+          var t = setTimeout(function() { row.classList.add('visible'); }, delay);
+          animTimers.push(t);
+        });
+        card.querySelectorAll('.sl-step').forEach(function(step) {
+          var delay = parseInt(step.dataset.delay || '0', 10);
+          var completeAt = step.dataset.complete ? parseInt(step.dataset.complete, 10) : 0;
+          var t1 = setTimeout(function() { step.classList.add('visible'); }, delay);
+          animTimers.push(t1);
+          if (completeAt) {
+            var t2 = setTimeout(function() {
+              var spinner = step.querySelector('.sl-spinner');
+              var check = step.querySelector('.sl-step-check');
+              if (spinner) spinner.style.display = 'none';
+              if (check) check.style.display = 'block';
+            }, completeAt);
+            animTimers.push(t2);
+          }
+        });
+        card.querySelectorAll('.sl-step-detail').forEach(function(d) {
+          var delay = parseInt(d.dataset.delay || '0', 10);
+          var t = setTimeout(function() { d.classList.add('visible'); }, delay);
+          animTimers.push(t);
+        });
+      }
+
+      function cycle() {
+        // The front card index
+        var frontIdx = order[0];
+        var frontCard = cards[frontIdx];
+
+        // Fly out the front card
+        frontCard.classList.add('deck-exit');
+
+        setTimeout(function() {
+          // Rotate order: move front to back
+          order.push(order.shift());
+          resetCard(frontCard);
+          assignPositions();
+
+          // Animate the new front card
+          var newFrontIdx = order[0];
+          resetCard(cards[newFrontIdx]);
+          setTimeout(function() { animateCard(cards[newFrontIdx]); }, 100);
+        }, 500);
+      }
+
+      // Initial setup
+      assignPositions();
+      cards.forEach(function(c) { resetCard(c); });
+      animateCard(cards[order[0]]);
+
+      setInterval(cycle, CARD_DISPLAY_TIME);
+    })();
 
     // Thinking status animation
     (function() {
