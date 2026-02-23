@@ -1,6 +1,6 @@
 {
   "name": "compass-agent",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "type": "module",
   "description": "Bring Claude Code to your Slack workspace — per-thread AI coding sessions with full local filesystem access",
   "bin": {
