@@ -1,4 +1,4 @@
-# Compass
+# 🧭 Compass
 
 [![Tests](https://github.com/raja-jamwal/compass/actions/workflows/test.yml/badge.svg)](https://github.com/raja-jamwal/compass/actions/workflows/test.yml)
 [![Publish to npm](https://github.com/raja-jamwal/compass/actions/workflows/publish.yml/badge.svg)](https://github.com/raja-jamwal/compass/actions/workflows/publish.yml)
