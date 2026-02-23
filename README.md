@@ -6,7 +6,7 @@
 
 Bring workforce of Claude Codes to your Slack workspace. Every thread becomes an isolated coding session — with its own working directory, git worktree, and full access to your local filesystem. Claude runs on your machine, streams responses in real-time, and your whole team can use it simultaneously without conflicts.
 
-![Agentic task visualization with sub-agents](assets/sub-agent.png)
+![Agentic task visualization with sub-agents](docs/assets/sub-agent.png)
 
 ## Quick start
 
@@ -45,7 +45,7 @@ Set the working directory for Claude to read/write files.
 
 The picker remembers previously used directories. CWD is stored per-thread in SQLite.
 
-![Working directory set in channel](assets/streaming-feedback.png)
+![Working directory set in channel](docs/assets/streaming-feedback.png)
 
 ### `$teach` — Team knowledge base
 
@@ -77,7 +77,7 @@ Responses stream token-by-token using Slack's native `chatStream` API, with auto
 
 Tool calls are visualized as an agentic timeline — each invocation (file reads, edits, shell commands) appears as a step that progresses from in-progress to complete.
 
-![Streaming response with planning and sub-agents](assets/planning-streaming.png)
+![Streaming response with planning and sub-agents](docs/assets/planning-streaming.png)
 
 ### Git worktree isolation
 

@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Compass — Bring Claude Code to Slack</title>
+  <meta name="description" content="Bring a workforce of Claude Codes to your Slack workspace. Per-thread AI coding sessions with full local filesystem access.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --bg-card: rgba(255, 255, 255, 0.03);
+      --bg-card-hover: rgba(255, 255, 255, 0.06);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-hover: rgba(255, 255, 255, 0.15);
+      --text: #e4e4e7;
+      --text-muted: #71717a;
+      --text-dim: #52525b;
+      --accent: #a78bfa;
+      --accent-dim: rgba(167, 139, 250, 0.15);
+      --accent2: #818cf8;
+      --green: #34d399;
+      --orange: #fb923c;
+      --radius: 12px;
+      --max-width: 1100px;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Gradient background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 100vh;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% -20%, rgba(167, 139, 250, 0.12), transparent),
+        radial-gradient(ellipse 60% 40% at 80% 10%, rgba(129, 140, 248, 0.08), transparent);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
+
+    /* ---- NAV ---- */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 16px 0;
+      background: rgba(10, 10, 15, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    nav .logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    nav .links { display: flex; gap: 24px; align-items: center; }
+    nav .links a {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+    nav .links .btn-nav {
+      background: var(--accent-dim);
+      color: var(--accent);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    nav .links .btn-nav:hover { background: rgba(167, 139, 250, 0.25); }
+
+    /* ---- HERO ---- */
+    .hero {
+      padding: 160px 0 80px;
+      text-align: center;
+    }
+    .hero .badges {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #fff 0%, #a78bfa 50%, #818cf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      max-width: 640px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero .cta-group {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* Code block / install command */
+    .install-cmd {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.95rem;
+      color: var(--green);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .install-cmd:hover {
+      border-color: var(--border-hover);
+      background: rgba(255, 255, 255, 0.07);
+    }
+    .install-cmd .dollar { color: var(--text-dim); user-select: none; }
+    .install-cmd .copy-icon { color: var(--text-dim); font-size: 0.85rem; }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent);
+      color: #0a0a0f;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: opacity 0.2s;
+    }
+    .btn-primary:hover { opacity: 0.9; text-decoration: none; }
+
+    /* Hero screenshot */
+    .hero-screenshot {
+      margin-top: 60px;
+      position: relative;
+    }
+    .hero-screenshot img {
+      width: 100%;
+      max-width: 900px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5), 0 0 120px rgba(167, 139, 250, 0.06);
+    }
+
+    /* ---- SECTION ---- */
+    section { padding: 80px 0; }
+    .section-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin-bottom: 48px;
+    }
+
+    /* ---- HOW IT WORKS ---- */
+    .flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      flex-wrap: wrap;
+      margin: 48px 0;
+    }
+    .flow-step {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 28px;
+      text-align: center;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .flow-step:hover {
+      border-color: var(--border-hover);
+      background: var(--bg-card-hover);
+    }
+    .flow-step .icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .flow-step .label { font-weight: 600; font-size: 0.95rem; }
+    .flow-step .desc { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+    .flow-arrow {
+      color: var(--text-dim);
+      font-size: 1.4rem;
+      padding: 0 12px;
+    }
+
+    /* ---- FEATURES GRID ---- */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: border-color 0.3s, background 0.3s, transform 0.3s;
+    }
+    .feature-card:hover {
+      border-color: var(--border-hover);
+      background: var(--bg-card-hover);
+      transform: translateY(-2px);
+    }
+    .feature-card .icon { font-size: 1.6rem; margin-bottom: 12px; }
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .feature-card code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      background: rgba(167, 139, 250, 0.1);
+      color: var(--accent);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* ---- SCREENSHOTS ---- */
+    .screenshots-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 40px;
+    }
+    .screenshot-item {
+      display: flex;
+      align-items: center;
+      gap: 40px;
+    }
+    .screenshot-item:nth-child(even) { flex-direction: row-reverse; }
+    .screenshot-item img {
+      flex: 1;
+      max-width: 560px;
+      width: 100%;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+    .screenshot-text { flex: 1; }
+    .screenshot-text h3 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .screenshot-text p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.7;
+    }
+
+    /* ---- SETUP ---- */
+    .setup-steps {
+      display: grid;
+      gap: 20px;
+      counter-reset: step;
+    }
+    .setup-step {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 28px 28px 72px;
+      position: relative;
+      counter-increment: step;
+    }
+    .setup-step::before {
+      content: counter(step);
+      position: absolute;
+      left: 24px;
+      top: 28px;
+      width: 32px;
+      height: 32px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .setup-step h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .setup-step p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+    .setup-step pre {
+      margin-top: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: var(--green);
+    }
+
+    /* ---- CONFIG TABLE ---- */
+    .config-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .config-table th {
+      text-align: left;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .config-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .config-table tr:last-child td { border-bottom: none; }
+    .config-table code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      background: rgba(167, 139, 250, 0.1);
+      color: var(--accent);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .config-table .required {
+      color: var(--orange);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .config-table .optional {
+      color: var(--text-dim);
+      font-size: 0.75rem;
+    }
+
+    /* ---- FOOTER ---- */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 0;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+    }
+    footer .footer-links {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--text); }
+
+    /* ---- RESPONSIVE ---- */
+    @media (max-width: 768px) {
+      .hero { padding: 120px 0 60px; }
+      .flow-arrow { display: none; }
+      .flow { gap: 12px; }
+      .flow-step { flex: 1; min-width: 140px; padding: 14px 16px; }
+      .screenshot-item,
+      .screenshot-item:nth-child(even) {
+        flex-direction: column;
+      }
+      .screenshot-item img { max-width: 100%; }
+      .setup-step { padding-left: 64px; }
+      nav .links a:not(.btn-nav) { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container">
+      <div class="logo">🧭 Compass</div>
+      <div class="links">
+        <a href="#features">Features</a>
+        <a href="#setup">Setup</a>
+        <a href="https://github.com/raja-jamwal/compass" class="btn-nav">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="badges">
+        <a href="https://github.com/raja-jamwal/compass/actions/workflows/test.yml"><img src="https://github.com/raja-jamwal/compass/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
+        <a href="https://www.npmjs.com/package/compass-agent"><img src="https://img.shields.io/npm/v/compass-agent" alt="npm version"></a>
+      </div>
+      <h1>Bring Claude Code<br>to your Slack workspace</h1>
+      <p>Every thread becomes an isolated coding session — with its own working directory, git worktree, and full local filesystem access. Your whole team, working in parallel, zero conflicts.</p>
+      <div class="cta-group">
+        <div class="install-cmd" onclick="navigator.clipboard.writeText('bunx compass-agent')">
+          <span class="dollar">$</span> bunx compass-agent
+          <span class="copy-icon">📋</span>
+        </div>
+        <a href="https://github.com/raja-jamwal/compass" class="btn-primary">View on GitHub →</a>
+      </div>
+      <div class="hero-screenshot">
+        <img src="assets/sub-agent.png" alt="Compass running sub-agents in Slack">
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how-it-works">
+    <div class="container">
+      <div class="section-label">How it works</div>
+      <div class="section-title">Local-first, zero infrastructure</div>
+      <div class="section-desc">Compass runs on your machine using Slack's Socket Mode. No servers, no ngrok, no cloud deployment.</div>
+      <div class="flow">
+        <div class="flow-step">
+          <div class="icon">💬</div>
+          <div class="label">Slack Thread</div>
+          <div class="desc">You send a message</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="icon">🔌</div>
+          <div class="label">Socket Mode</div>
+          <div class="desc">Bot receives it locally</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="icon">🤖</div>
+          <div class="label">Claude CLI</div>
+          <div class="desc">Spawns a session</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="icon">📂</div>
+          <div class="label">Filesystem</div>
+          <div class="desc">Reads &amp; writes files</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="container">
+      <div class="section-label">Features</div>
+      <div class="section-title">Everything your team needs</div>
+      <div class="section-desc">Built for real development workflows — not demos.</div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="icon">🧵</div>
+          <h3>Per-thread sessions</h3>
+          <p>Every thread is an independent Claude session. Follow-up messages resume the conversation with full context using <code>--resume</code>.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">📁</div>
+          <h3><code>$cwd</code> — Working directory</h3>
+          <p>Set the directory Claude works in. Interactive picker remembers recent directories, or set it directly with a path.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🎓</div>
+          <h3><code>$teach</code> — Team knowledge</h3>
+          <p>Store conventions that get injected into every session. "Use TypeScript", "Always write tests" — shared across your workspace.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">⚡</div>
+          <h3>Streaming responses</h3>
+          <p>Token-by-token streaming via Slack's native <code>chatStream</code> API. Tool calls render as an agentic timeline with live progress.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🌳</div>
+          <h3>Git worktree isolation</h3>
+          <p>Each thread gets its own worktree and branch. Parallel sessions make code changes without conflicts. Auto-cleanup after 24 hours.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">📊</div>
+          <h3>Dashboard &amp; usage tracking</h3>
+          <p>App Home shows live stats, recent sessions, cost tracking per invocation. Stop button on every response. User whitelist support.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screenshots -->
+  <section id="screenshots">
+    <div class="container">
+      <div class="section-label">In action</div>
+      <div class="section-title">See it working</div>
+      <div class="section-desc"></div>
+      <div class="screenshots-grid">
+        <div class="screenshot-item">
+          <img src="assets/streaming-feedback.png" alt="Working directory set in Slack channel">
+          <div class="screenshot-text">
+            <h3>Set a working directory, start coding</h3>
+            <p>Point Claude at any project on your machine. The working directory is stored per-thread, so each conversation is scoped to its own codebase.</p>
+          </div>
+        </div>
+        <div class="screenshot-item">
+          <img src="assets/planning-streaming.png" alt="Streaming response with planning and sub-agents">
+          <div class="screenshot-text">
+            <h3>Agentic tool timeline</h3>
+            <p>Watch Claude think, plan, and execute in real-time. Every tool call — file reads, edits, shell commands, sub-agents — renders as a live progress step.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Setup -->
+  <section id="setup">
+    <div class="container">
+      <div class="section-label">Get started</div>
+      <div class="section-title">Up and running in 5 minutes</div>
+      <div class="section-desc"></div>
+      <div class="setup-steps">
+        <div class="setup-step">
+          <h3>Create the Slack app</h3>
+          <p>Go to <a href="https://api.slack.com/apps">api.slack.com/apps</a>, create from manifest using the included <code>manifest.yml</code>, and install to your workspace. Grab the App-Level Token and Bot Token.</p>
+        </div>
+        <div class="setup-step">
+          <h3>Configure environment</h3>
+          <p>Store your tokens in <code>~/.compass/.env</code>:</p>
+          <pre>mkdir -p ~/.compass
+cat > ~/.compass/.env &lt;&lt; 'EOF'
+SLACK_APP_TOKEN=xapp-1-...
+SLACK_BOT_TOKEN=xoxb-...
+EOF</pre>
+        </div>
+        <div class="setup-step">
+          <h3>Run</h3>
+          <p>One command. No servers, no ngrok.</p>
+          <pre>bunx compass-agent</pre>
+        </div>
+        <div class="setup-step">
+          <h3>Verify</h3>
+          <p>Open the app in Slack, go to the Home tab to see the dashboard, start a thread, set <code>$cwd</code>, and send a question.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Configuration -->
+  <section id="config">
+    <div class="container">
+      <div class="section-label">Configuration</div>
+      <div class="section-title">Environment variables</div>
+      <div class="section-desc"></div>
+      <table class="config-table">
+        <thead>
+          <tr>
+            <th>Variable</th>
+            <th></th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>SLACK_APP_TOKEN</code></td>
+            <td><span class="required">Required</span></td>
+            <td>App-level token (<code>xapp-...</code>) for Socket Mode</td>
+          </tr>
+          <tr>
+            <td><code>SLACK_BOT_TOKEN</code></td>
+            <td><span class="required">Required</span></td>
+            <td>Bot user OAuth token (<code>xoxb-...</code>)</td>
+          </tr>
+          <tr>
+            <td><code>ALLOWED_USERS</code></td>
+            <td><span class="optional">Optional</span></td>
+            <td>Comma-separated Slack user IDs to whitelist</td>
+          </tr>
+          <tr>
+            <td><code>CLAUDE_PATH</code></td>
+            <td><span class="optional">Optional</span></td>
+            <td>Path to the <code>claude</code> binary (defaults to <code>claude</code> in PATH)</td>
+          </tr>
+          <tr>
+            <td><code>CLAUDE_ADDITIONAL_ARGS</code></td>
+            <td><span class="optional">Optional</span></td>
+            <td>Extra CLI args appended to every <code>claude</code> invocation</td>
+          </tr>
+          <tr>
+            <td><code>ENV_*</code></td>
+            <td><span class="optional">Optional</span></td>
+            <td>Variables prefixed with <code>ENV_</code> are injected into Claude's environment</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-links">
+        <a href="https://github.com/raja-jamwal/compass">GitHub</a>
+        <a href="https://www.npmjs.com/package/compass-agent">npm</a>
+        <a href="https://github.com/raja-jamwal/compass/issues">Issues</a>
+      </div>
+      <p>MIT License</p>
+    </div>
+  </footer>
+
+</body>
+</html>
