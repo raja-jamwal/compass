@@ -33,6 +33,26 @@ if (envFileIdx !== -1 && process.argv[envFileIdx + 1]) {
 Object.assign(process.env, realEnv);
 // -----------------------------------------------------------------------------------------
 
+// --- Required env validation ---
+const requiredEnv = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"] as const;
+const missing = requiredEnv.filter((k) => !process.env[k]);
+if (missing.length > 0) {
+  console.error(`ERROR: Missing required environment variable(s): ${missing.join(", ")}`);
+  process.exit(1);
+}
+
+// Validate CLAUDE_PATH exists
+const claudePath = process.env.CLAUDE_PATH || "claude";
+if (path.isAbsolute(claudePath)) {
+  if (!fs.existsSync(claudePath)) {
+    console.error(`ERROR: CLAUDE_PATH not found: ${claudePath}`);
+    process.exit(1);
+  }
+} else if (!Bun.which(claudePath)) {
+  console.error(`ERROR: CLAUDE_PATH "${claudePath}" not found in PATH. Set CLAUDE_PATH in .env to the full path of the claude binary.`);
+  process.exit(1);
+}
+
 import { App } from "@slack/bolt";
 import { execFileSync } from "child_process";
 import {
@@ -218,8 +238,6 @@ app.command("/cwd", async ({ command, ack, client }: any) => {
     },
   });
 });
-
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 
 // ── Modal submissions ───────────────────────────────────────
 
@@ -647,18 +665,6 @@ async function processMessage({ channelId, threadTs, messageTs, userText, userId
 // ── Startup ─────────────────────────────────────────────────
 
 (async () => {
-  // Validate CLAUDE_PATH exists before starting
-  const claudePath = process.env.CLAUDE_PATH || "claude";
-  // Check if it's an absolute path that exists, or resolve via Bun.which
-  if (path.isAbsolute(claudePath)) {
-    if (!fs.existsSync(claudePath)) {
-      console.error(`ERROR: CLAUDE_PATH not found: ${claudePath}`);
-      process.exit(1);
-    }
-  } else if (!Bun.which(claudePath)) {
-    console.error(`ERROR: CLAUDE_PATH "${claudePath}" not found in PATH. Set CLAUDE_PATH in .env to the full path of the claude binary.`);
-    process.exit(1);
-  }
   log(null, `Claude CLI found: ${claudePath}`);
 
   // Register MCP server (idempotent — overwrites if already exists)
