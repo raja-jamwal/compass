@@ -1,5 +1,9 @@
 # Compass
 
+[![Tests](https://github.com/raja-jamwal/compass/actions/workflows/test.yml/badge.svg)](https://github.com/raja-jamwal/compass/actions/workflows/test.yml)
+[![Publish to npm](https://github.com/raja-jamwal/compass/actions/workflows/publish.yml/badge.svg)](https://github.com/raja-jamwal/compass/actions/workflows/publish.yml)
+[![npm version](https://img.shields.io/npm/v/compass-agent)](https://www.npmjs.com/package/compass-agent)
+
 A Slack app that connects Claude Code to your workspace. Every thread becomes a coding session — set a working directory, ask questions, and get answers with full access to your local filesystem. Claude runs on your machine, streams responses in real-time, and remembers context across messages.
 
 ![Agentic task visualization with sub-agents](assets/sub-agent.png)
