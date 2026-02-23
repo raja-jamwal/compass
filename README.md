@@ -2,7 +2,7 @@
 
 A Slack app that connects Claude Code to your workspace. Every thread becomes a coding session — set a working directory, ask questions, and get answers with full access to your local filesystem. Claude runs on your machine, streams responses in real-time, and remembers context across messages.
 
-![Agentic task visualization with tool timeline](assets/git-push.png)
+![Agentic task visualization with sub-agents](assets/sub-agent.png)
 
 ## How it works
 
@@ -36,7 +36,7 @@ Each thread requires a working directory before Claude can run. This is where Cl
 
 The picker remembers previously used directories. CWD is stored per-thread in SQLite.
 
-![Interactive directory picker](assets/select-cwd.png)
+![Working directory set in channel](assets/streaming-feedback.png)
 
 ### `$teach` — Team knowledge base
 
@@ -71,7 +71,7 @@ If streaming fails (e.g., missing permissions or API errors), the bot falls back
 
 Claude's tool calls are visualized as an agentic timeline — each tool invocation (file reads, code edits, shell commands) appears as a step that progresses from in-progress to complete.
 
-![Streaming response with tool calls](assets/git-push-response.png)
+![Streaming response with planning and sub-agents](assets/planning-streaming.png)
 
 ### Stop button
 
